@@ -3,7 +3,7 @@
   import Map from '$lib/components/map/Map.svelte';
   import TimeSeriesChart from '$lib/components/charts/Chart.svelte';
   import SeverityChart from '$lib/components/charts/SeverityChart.svelte';
-  
+  import { fetchBurnedAreaLayer } from '$lib/services/gee-service';
   
   // Referências para componentes
   let mapComponent: Map;
@@ -21,6 +21,16 @@
   let latCoord: string = '';
   let bufferRadius: string = '';
   
+  type BurnedLayer = {
+    id: string;
+    label: string;
+    year: string;
+    visible: boolean;
+  };
+
+  let burnedLayers: BurnedLayer[] = [];
+
+
   // Opções para seletores
   const datasets = ['ICNF burned areas', 'EFFIS burned areas'];
   const satellites = ['Terra/MODIS', 'Landsat-5/TM', 'Landsat-7/ETM', 'Landsat-8/OLI', 'Sentinel-2/MSI'];
@@ -77,45 +87,49 @@
   }
   
   // Funções de ação para os botões
+  
   async function addLayerToMap() {
     if (!selectedDataset || !selectedYear) {
       alert('Selecione um conjunto de dados e um ano primeiro!');
       return;
     }
-    
+
     isLoading = true;
     
     try {
-      const response = await fetch('/api/gee', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          action: 'getBurnedAreaData',
-          params: {
-            dataset: selectedDataset,
-            year: selectedYear
-          }
-        })
-      });
+      // Converte o tipo de dataset para o formato esperado pela API
+      const datasetType = selectedDataset === 'ICNF burned areas' ? 'ICNF' : 'EFFIS';
       
-      const data = await response.json();
+      // Usa a função do serviço em vez de fazer a chamada diretamente
+      const data = await fetchBurnedAreaLayer(datasetType, parseInt(selectedYear));
       
-      if (data.error) {
-        throw new Error(data.error);
-      }
-      
+      const validGeoJSON = {
+        type: data.type,
+        features: data.features
+      };
+
+      const layerId = `${selectedDataset} ${selectedYear}`;
+
       // Adicionar camada ao mapa
       mapComponent.addBurnedAreaLayer(
-        `${selectedDataset} ${selectedYear}`,
-        data.result,
+        layerId,
+        validGeoJSON,
         { 
           color: selectedDataset === 'ICNF burned areas' ? 'red' : 'black',
           fillOpacity: 0.5
         }
       );
       
+      // Guarda no array local
+      if (!burnedLayers.find(l => l.id === layerId)) {
+        burnedLayers.push({
+          id: layerId,
+          label: selectedDataset,
+          year: selectedYear,
+          visible: true
+        });
+      }
+
       // Mudar modo de seleção para "select"
       setInputMethodSelect();
       
@@ -125,7 +139,27 @@
     } finally {
       isLoading = false;
     }
+}
+
+function toggleLayerVisibility(layer: BurnedLayer) {
+  layer.visible = !layer.visible;
+  if (layer.visible) {
+    // (Re)adiciona camada — podes guardar o GeoJSON original se quiseres
+    fetchBurnedAreaLayer(layer.label === 'ICNF burned areas' ? 'ICNF' : 'EFFIS', parseInt(layer.year)).then((geojson) => {
+      const simplified = {
+        type: geojson.type,
+        features: geojson.features
+      };
+      mapComponent.addBurnedAreaLayer(layer.id, simplified, {
+        color: layer.label === 'ICNF burned areas' ? 'red' : 'black',
+        fillOpacity: 0.5
+      });
+    });
+  } else {
+    mapComponent.removeBurnedAreaLayer(layer.id);
   }
+}
+
   
   async function displayImage() {
     if (!selectedSatellite || !selectedIndex || !startDate || !endDate) {
@@ -328,6 +362,23 @@
         <button on:click={addLayerToMap} disabled={isLoading}>
           ➕ Adicionar camada
         </button>
+        {#if burnedLayers.length > 0}
+          <div class="burned-layers-list">
+            <h4>Camadas adicionadas</h4>
+            {#each burnedLayers as layer (layer.id)}
+              <div class="layer-item">
+                <label>
+                  <input
+                    type="checkbox"
+                    bind:checked={layer.visible}
+                    on:change={() => toggleLayerVisibility(layer)}
+                  />
+                  {layer.label} {layer.year}
+                </label>
+              </div>
+            {/each}
+          </div>
+        {/if}
       </div>
       
       <div class="panel-section">
@@ -638,4 +689,16 @@
       flex-direction: column;
     }
   }
+
+  .burned-layers-list {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #ccc;
+  }
+
+  .layer-item {
+    margin-bottom: 5px;
+    font-size: 0.9em;
+  }
+
 </style>
