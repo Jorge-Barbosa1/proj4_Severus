@@ -60,16 +60,14 @@ export const POST: RequestHandler = async ({ request }) => {
           ).copyProperties(img, ['system:time_start']);
         case 'Landsat-5/TM':
         case 'Landsat-7/ETM':
-          const scaled57 = img.divide(10000);
           return (index === 'NBR'
-            ? scaled57.normalizedDifference(['SR_B4', 'SR_B7']).rename('NBR')
-            : scaled57.normalizedDifference(['SR_B4', 'SR_B3']).rename('NDVI')           
+            ? img.normalizedDifference(['SR_B4', 'SR_B7']).rename('NBR')
+            : img.normalizedDifference(['SR_B4', 'SR_B3']).rename('NDVI')           
            ).copyProperties(img, ['system:time_start']);
         case 'Landsat-8/OLI':
-          const scaled8 = img.divide(10000);
            return (index === 'NBR'
-            ? scaled8.normalizedDifference(['SR_B5', 'SR_B7']).rename('NBR')
-            : scaled8.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
+            ? img.normalizedDifference(['SR_B5', 'SR_B7']).rename('NBR')
+            : img.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
           ).copyProperties(img, ['system:time_start']);
         case 'Sentinel-2/MSI':
           return (index === 'NBR'
@@ -85,9 +83,17 @@ export const POST: RequestHandler = async ({ request }) => {
     const composite = processed.mean().clip(roi);
 
     // Parâmetros de visualização
-    const visParams = index === 'NDVI'
-      ? { min: -0.2, max: 0.8, palette: ['red', 'orange', 'yellow', 'green', 'darkgreen'] }
-      : { min: -0.5, max: 1, palette: ['red', 'orange', 'yellow', 'green', 'darkgreen'] };
+    let visParams;
+    
+    if (index === 'NDVI') {
+      visParams = satellite.includes('MODIS') ? 
+        { min: -0.2, max: 0.8, palette: ['red', 'orange', 'yellow', 'green', 'darkgreen'] } :
+        { min: 0.0, max: 0.8, palette: ['brown', 'yellow', 'green', 'darkgreen'] }; // melhor para Landsat/Sentinel
+    } else if (index === 'NBR') {
+      visParams = { min: -1.0, max: 1.0, palette: ['red', 'orange', 'yellow', 'green', 'blue'] };
+    } else {
+      throw new Error('Índice desconhecido.');
+    }
 
     // Criar mapa
     return new Promise((resolve, reject) => {

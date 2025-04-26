@@ -2,12 +2,16 @@
   import { onMount, createEventDispatcher } from 'svelte';
   import L from 'leaflet';
   import 'leaflet/dist/leaflet.css';
+  import 'leaflet-draw';
+  import 'leaflet-draw/dist/leaflet.draw.css';
 
   let map: L.Map;
   const dispatcher = createEventDispatcher();
 
   let geoJsonLayers: Record<string, L.GeoJSON> = {};
   let imageLayer: L.TileLayer | null = null;
+  let drawnItems = L.featureGroup();
+  let drawControl: L.Control.Draw;
 
   onMount(() => {
     map = L.map('map', {
@@ -18,10 +22,41 @@
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
+
+    // Adicionar camada para desenhos
+    map.addLayer(drawnItems);
+
+    drawControl = new L.Control.Draw({
+      draw: {
+        polyline: false,
+        circle: false,
+        circlemarker: false,
+        marker: true,
+        rectangle: true,
+        polygon: true
+      },
+      edit: {
+        featureGroup: drawnItems,
+        remove: true
+      }
+    });
+
+    map.addControl(drawControl);
+
+    map.on(L.Draw.Event.CREATED, (event: any) => {
+      const layer = event.layer;
+      drawnItems.clearLayers(); // só deixar 1 forma desenhada
+      drawnItems.addLayer(layer);
+
+      const geojson = layer.toGeoJSON();
+      console.log('Geometria desenhada:', geojson);
+
+      const customEvent = new CustomEvent('geometryDrawn', { detail: geojson.geometry });
+      document.dispatchEvent(customEvent);
+    });
   });
 
   export function addBurnedAreaLayer(id: string, geojson: any, options: { color: string; fillOpacity: number }) {
-    // Remove se já existir
     if (geoJsonLayers[id]) {
       map.removeLayer(geoJsonLayers[id]);
     }
@@ -56,23 +91,28 @@
   }
 
   export function addCompositeImageLayer(tileUrl: string) {
-  if (imageLayer) {
-    map.removeLayer(imageLayer);
+    if (imageLayer) {
+      map.removeLayer(imageLayer);
+    }
+
+    imageLayer = L.tileLayer(tileUrl, {
+      opacity: 0.7,
+      tileSize: 256,
+      detectRetina: true,
+      tms: false,
+      crossOrigin: true,
+    }).addTo(map);
   }
 
-  imageLayer = L.tileLayer(tileUrl, {
-    opacity: 0.7,
-    tileSize: 256,
-    detectRetina: true,
-    tms: false, // Earth Engine tiles não usam TMS
-    crossOrigin: true, // importante para evitar bloqueio de CORS
-  }).addTo(map);
-}
-
-
   export function getSelectedGeometry() {
-    // A implementar se quiseres permitir desenhar polígonos depois
-    return null;
+    if (drawnItems.getLayers().length === 0) {
+      return null;
+    }
+    return drawnItems.getLayers()[0].toGeoJSON().geometry;
+  }
+
+  export function clearDrawing() {
+    drawnItems.clearLayers();
   }
 </script>
 
