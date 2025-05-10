@@ -1,141 +1,129 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { browser } from '$app/environment';
   import Map from '$lib/components/map/Map.svelte';
-  import TimeSeriesChart from '$lib/components/charts/Chart.svelte';
-  import SeverityChart from '$lib/components/charts/SeverityChart.svelte';
-  import { fetchBurnedAreaLayer } from '$lib/services/gee-service';
+  import FireAnalyst from '$lib/components/analyst/FireAnalyst.svelte';
 
-  /* ---------- estado ---------- */
   let mapComponent: Map;
-
   let selectedDataset = '';
-  let selectedYear     = '';
+  let selectedYear = '';
   let selectedSatellite = '';
-  let selectedIndex     = '';
-
+  let selectedIndex = '';
   let startDate = new Date().toISOString().split('T')[0];
-  let endDate   = new Date().toISOString().split('T')[0];
-  let fireDate  = '';
-
+  let endDate = new Date().toISOString().split('T')[0];
+  let fireDate = '';
   let analysisRangeDays = 30;
+  let selectedGeometry: any = null;
+  let isLoading = false;
 
-  let lonCoord = '';
-  let latCoord = '';
-  let bufferRadius = '';
-
-  type BurnedLayer = { id:string; label:string; year:string; visible:boolean };
+  type BurnedLayer = { id: string; label: string; year: string; visible: boolean };
   let burnedLayers: BurnedLayer[] = [];
 
-  /* ---------- listas ---------- */
-  const datasets   = ['ICNF burned areas', 'EFFIS burned areas'];
-  const icnfYears  = Array.from({length:22},(_,i)=> (2000+i).toString());
-  const effisYears = [...icnfYears,'2022','2023'];
+  const datasets = ['ICNF burned areas', 'EFFIS burned areas'];
+  const icnfYears = Array.from({ length: 22 }, (_, i) => (2000 + i).toString());
+  const effisYears = [...icnfYears, '2022', '2023'];
   const satelliteLabels = {
-    MODIS    : 'Terra/MODIS',
-    Landsat5 : 'Landsat-5/TM',
-    Landsat7 : 'Landsat-7/ETM',
-    Landsat8 : 'Landsat-8/OLI',
+    MODIS: 'Terra/MODIS',
+    Landsat5: 'Landsat-5/TM',
+    Landsat7: 'Landsat-7/ETM',
+    Landsat8: 'Landsat-8/OLI',
     Sentinel2: 'Sentinel-2/MSI'
   };
   const satellites = Object.values(satelliteLabels);
-  const indices    = ['NBR','NDVI'];
-  $: years = selectedDataset==='ICNF burned areas' ? icnfYears : effisYears;
-
-  /* ---------- outros estados ---------- */
-  let timeSeriesData: {x:Date;y:number}[] = [];
-  let severityData  : {days:number;delta:number}[] = [];
-
-  let inputMethod:'draw'|'select'|'coords'='draw';
-  let isLoading = false;
+  const indices = ['NBR', 'NDVI'];
+  $: years = selectedDataset === 'ICNF burned areas' ? icnfYears : effisYears;
 
   onMount(() => {
-    // quando o utilizador desenhar alguma geometria no mapa
-    document.addEventListener('geometryDrawn',(e:any)=>{
-      inputMethod='draw';
+    if (!browser) return;
+    document.addEventListener('geometryDrawn', (e: any) => {
+      selectedGeometry = e.detail;
+    });
+    document.addEventListener('mapClicked', async (e: any) => {
+      const { lat, lon } = e.detail;
+      if (!selectedDataset || !selectedYear) return;
+      try {
+        isLoading = true;
+        const res = await fetch('/api/gee/mapper', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lat,
+            lon,
+            dataset: selectedDataset === 'ICNF burned areas' ? 'ICNF' : 'EFFIS',
+            year: parseInt(selectedYear)
+          })
+        });
+        const feature = await res.json();
+        selectedGeometry = feature.geometry;
+        fireDate = feature.properties.fire_date || feature.properties.data_inici || '';
+        mapComponent?.addBurnedAreaLayer('selected-area', {
+          type: 'FeatureCollection',
+          features: [feature]
+        }, { color: 'yellow', fillOpacity: 0.7 });
+      } catch (err) {
+        console.error(err);
+      } finally {
+        isLoading = false;
+      }
     });
   });
 
-  /* ---------- helpers de UI ---------- */
-  const setInputMethodDraw   = ()=> inputMethod='draw';
-  const setInputMethodSelect = ()=> inputMethod='select';
-  const setInputMethodCoords = ()=> inputMethod='coords';
-
-  /* ---------- #1 adicionar camada de área queimada ---------- */
   async function addLayerToMap() {
-    if(!selectedDataset || !selectedYear){
-      alert('Selecione um conjunto de dados e um ano.');
-      return;
-    }
-    isLoading=true;
-    try{
-      const dsType = selectedDataset==='ICNF burned areas' ? 'ICNF' : 'EFFIS';
-      const geojson = await fetchBurnedAreaLayer(dsType,parseInt(selectedYear));
-
-      const id = `${selectedDataset}-${selectedYear}`;
-      mapComponent.addBurnedAreaLayer(
-        id,
-        {type:geojson.type,features:geojson.features},
-        {color: dsType==='ICNF' ? 'red':'black',fillOpacity:0.5}
-      );
-
-      if(!burnedLayers.find(l=>l.id===id)){
-        burnedLayers=[...burnedLayers,{id, label:selectedDataset, year:selectedYear, visible:true}];
-      }
-      setInputMethodSelect();
-    }catch(err:any){
-      console.error(err);
-      alert(`Erro ao carregar dados: ${err.message}`);
-    }finally{ isLoading=false; }
-  }
-
-  function toggleLayerVisibility(layer:BurnedLayer){
-    layer.visible=!layer.visible;
-    if(layer.visible){
-      addLayerToMap();     // volta a adicionar (podia-se guardar o geojson em cache)
-    }else{
-      mapComponent.removeBurnedAreaLayer(layer.id);
-    }
-  }
-
-  /* ---------- #2 exibir imagem composta ---------- */
-  async function displayImage(){
-    if(!selectedSatellite || !selectedIndex || !startDate || !endDate){
-      alert('Selecione satélite, índice e datas.');
-      return;
-    }
-    isLoading=true;
-    try{
-      const res = await fetch('/api/gee/composite-image',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          satellite:selectedSatellite,
-          index:selectedIndex,
-          startDate,
-          endDate
-        })
+    if (!selectedDataset || !selectedYear) return;
+    isLoading = true;
+    try {
+      const dsType = selectedDataset === 'ICNF burned areas' ? 'ICNF' : 'EFFIS';
+      const res = await fetch('/api/gee/burned-areas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataset: dsType, year: parseInt(selectedYear) })
       });
-      const data = await res.json();
-      if(data.error) throw new Error(data.error);
-
-      const { tileUrl } = data;
-      mapComponent.addCompositeImageLayer(tileUrl);
-    }catch(err:any){
+      const geojson = await res.json();
+      const id = `${selectedDataset}-${selectedYear}`;
+      mapComponent?.addBurnedAreaLayer(id, geojson, {
+        color: dsType === 'ICNF' ? 'red' : 'black',
+        fillOpacity: 0.5
+      });
+      if (!burnedLayers.find(l => l.id === id)) {
+        burnedLayers = [...burnedLayers, { id, label: selectedDataset, year: selectedYear, visible: true }];
+      }
+    } catch (err) {
       console.error(err);
-      alert(`Erro ao carregar imagem: ${err.message}`);
-    }finally{ isLoading=false; }
+    } finally {
+      isLoading = false;
+    }
   }
 
-  /* ---------- #3 gerar série temporal (mantido) ---------- */
-  // ...  (todo o restante código mantém-se inalterado)
+  function toggleLayerVisibility(layer: BurnedLayer) {
+    layer.visible = !layer.visible;
+    if (layer.visible) addLayerToMap();
+    else mapComponent?.removeBurnedAreaLayer(layer.id);
+  }
+
+  async function displayImage() {
+    if (!selectedSatellite || !selectedIndex || !startDate || !endDate) return;
+    isLoading = true;
+    try {
+      const res = await fetch('/api/gee/composite-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ satellite: selectedSatellite, index: selectedIndex, startDate, endDate })
+      });
+      const { tileUrl } = await res.json();
+      mapComponent?.addCompositeImageLayer(tileUrl);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      isLoading = false;
+    }
+  }
 </script>
 
 <div class="analyst-container">
   <h1>Analise de Severidade de Incêndios 🔥</h1>
   <p class="subtitle">Projeto SeverusPT - Um produto e serviço baseado na web para avaliação e previsão da severidade de incêndios em Portugal Continental (FCT: PCIF/RPG/0170/2019)</p>
-  
+
   <div class="main-content">
-    <!-- Painel esquerdo -->
     <div class="left-panel">
       <div class="panel-section">
         <h3>#1 Selecione conjunto de dados de área queimada</h3>
@@ -145,28 +133,20 @@
             <option value={dataset}>{dataset}</option>
           {/each}
         </select>
-        
         <select bind:value={selectedYear}>
           <option value="">Selecione ano</option>
           {#each years as year}
             <option value={year}>{year}</option>
           {/each}
         </select>
-        
-        <button on:click={addLayerToMap} disabled={isLoading}>
-          ➕ Adicionar camada
-        </button>
+        <button on:click={addLayerToMap} disabled={isLoading}>➕ Adicionar camada</button>
         {#if burnedLayers.length > 0}
           <div class="burned-layers-list">
             <h4>Camadas adicionadas</h4>
             {#each burnedLayers as layer (layer.id)}
               <div class="layer-item">
                 <label>
-                  <input
-                    type="checkbox"
-                    bind:checked={layer.visible}
-                    on:change={() => toggleLayerVisibility(layer)}
-                  />
+                  <input type="checkbox" bind:checked={layer.visible} on:change={() => toggleLayerVisibility(layer)} />
                   {layer.label} {layer.year}
                 </label>
               </div>
@@ -174,7 +154,6 @@
           </div>
         {/if}
       </div>
-      
       <div class="panel-section">
         <h3>#2 Selecione sensor, índice e intervalo</h3>
         <select bind:value={selectedSatellite}>
@@ -183,117 +162,39 @@
             <option value={satellite}>{satellite}</option>
           {/each}
         </select>
-        
         <select bind:value={selectedIndex}>
           <option value="">Selecione índice espectral</option>
           {#each indices as index}
             <option value={index}>{index}</option>
           {/each}
         </select>
-        
         <div class="date-inputs">
-          <label>
-            Data inicial:
-            <input type="date" bind:value={startDate} />
-          </label>
-          
-          <label>
-            Data final:
-            <input type="date" bind:value={endDate} />
-          </label>
+          <label>Data inicial:<input type="date" bind:value={startDate} /></label>
+          <label>Data final:<input type="date" bind:value={endDate} /></label>
         </div>
-        
-        <button on:click={displayImage} disabled={isLoading}>
-          🖼️ Exibir imagem
-        </button>
+        <button on:click={displayImage} disabled={isLoading}>🖼️ Exibir imagem</button>
       </div>
-      
       <div class="panel-section">
-        <h3>#3 Defina área de interesse</h3>
-        
-        <div class="input-method-selector">
-          <button class:active={inputMethod === 'draw'} on:click={setInputMethodDraw}>
-            ✏️ Desenhar
-          </button>
-          <button class:active={inputMethod === 'select'} on:click={setInputMethodSelect}>
-            🔍 Selecionar
-          </button>
-          <button class:active={inputMethod === 'coords'} on:click={setInputMethodCoords}>
-            📍 Coordenadas
-          </button>
-        </div>
-        
-        {#if inputMethod === 'coords'}
-          <div class="coords-input">
-            <label>
-              Longitude:
-              <input type="number" bind:value={lonCoord} placeholder="-9.1393" step="0.0001" />
-            </label>
-            
-            <label>
-              Latitude:
-              <input type="number" bind:value={latCoord} placeholder="38.7223" step="0.0001" />
-            </label>
-            
-            <label>
-              Raio de buffer (km):
-              <input type="number" bind:value={bufferRadius} placeholder="1" min="0" step="0.1" />
-            </label>
-          </div>
-        {/if}
-        
-        <button on:click={plotTimeSeries} disabled={isLoading}>
-          📈 Gerar série temporal
-        </button>
-      </div>
-      
-      <div class="panel-section">
-        <h3>#4 Calcular severidade</h3>
-        
-        <label>
-          Data do incêndio:
-          <input type="date" bind:value={fireDate} />
-        </label>
-        
-        <label>
-          Período de análise (dias):
-          <input type="number" bind:value={analysisRangeDays} min="1" max="365" step="1" />
-        </label>
-        
-        <button on:click={calculateSeverity} disabled={isLoading}>
-          🔥 Calcular severidade
-        </button>
+        <h3>#3 Parâmetros para análise</h3>
+        <label>Data do incêndio:<input type="date" bind:value={fireDate} /></label>
+        <label>Período de análise (dias):<input type="number" bind:value={analysisRangeDays} min="1" max="365" step="1" /></label>
       </div>
     </div>
-    
-    <!-- Painel direito -->
     <div class="right-panel">
-      <div class="map-container">
-        <Map bind:this={mapComponent} />
-      </div>
-      
+      <div class="map-container"><Map bind:this={mapComponent} /></div>
       <div class="charts-container">
-        <div class="chart">
-          <h3>Série Temporal</h3>
-          {#if timeSeriesData.length > 0}
-            <TimeSeriesChart data={timeSeriesData} index={selectedIndex} />
-          {:else}
-            <p class="no-data">Dados não disponíveis. Gere uma série temporal primeiro.</p>
-          {/if}
-        </div>
-        
-        <div class="chart">
-          <h3>Severidade do Incêndio</h3>
-          {#if severityData.length > 0}
-            <SeverityChart data={severityData} index={selectedIndex} />
-          {:else}
-            <p class="no-data">Dados não disponíveis. Calcule a severidade primeiro.</p>
-          {/if}
-        </div>
+        <FireAnalyst
+          geometry={selectedGeometry}
+          fireDate={fireDate}
+          satellite={selectedSatellite}
+          index={selectedIndex}
+          startDate={startDate}
+          endDate={endDate}
+          analysisRangeDays={analysisRangeDays}
+        />
       </div>
     </div>
   </div>
-  
   {#if isLoading}
     <div class="loading-overlay">
       <div class="spinner"></div>
@@ -301,6 +202,7 @@
     </div>
   {/if}
 </div>
+
 
 <style>
   .analyst-container {
@@ -483,16 +385,13 @@
       flex-direction: column;
     }
   }
-
   .burned-layers-list {
     margin-top: 10px;
     padding-top: 10px;
     border-top: 1px solid #ccc;
   }
-
   .layer-item {
     margin-bottom: 5px;
     font-size: 0.9em;
   }
-
 </style>

@@ -1,37 +1,42 @@
 <script lang="ts">
-  import { onMount, createEventDispatcher } from 'svelte';
-  import L from 'leaflet';
-  import 'leaflet/dist/leaflet.css';
-  import 'leaflet-draw';
-  import 'leaflet-draw/dist/leaflet.draw.css';
+  import { onMount } from 'svelte';
+  import { browser } from '$app/environment';
+  import { createEventDispatcher } from 'svelte';
 
-  let map: L.Map;
+  let map;
+  let drawnItems;
+  let drawControl;
+  let geoJsonLayers = {};
+  let imageLayer = null;
+
   const dispatcher = createEventDispatcher();
 
-  let geoJsonLayers: Record<string, L.GeoJSON> = {};
-  let imageLayer: L.TileLayer | null = null;
-  let drawnItems = L.featureGroup();
-  let drawControl: L.Control.Draw;
+  onMount(async () => {
+    if (!browser) return;
 
-  onMount(() => {
-    map = L.map('map', {
-      center: [39.5, -8.0], // Centro de Portugal
-      zoom: 7
-    });
+    const L = await import('leaflet');
+    await import('leaflet/dist/leaflet.css');
+    await import('leaflet-draw');
+    await import('leaflet-draw/dist/leaflet.draw.css');
+
+    // Initialize map
+    map = L.map('map').setView([39.5, -8.0], 7);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    // Adicionar camada para desenhos
+    // Initialize feature group for drawings
+    drawnItems = new L.FeatureGroup();
     map.addLayer(drawnItems);
 
+    // Set up draw control
     drawControl = new L.Control.Draw({
       draw: {
         polyline: false,
         circle: false,
         circlemarker: false,
-        marker: true,
+        marker: false,
         rectangle: true,
         polygon: true
       },
@@ -40,23 +45,31 @@
         remove: true
       }
     });
-
     map.addControl(drawControl);
 
-    map.on(L.Draw.Event.CREATED, (event: any) => {
-      const layer = event.layer;
-      drawnItems.clearLayers(); // só deixar 1 forma desenhada
+    // Listen to drawing created event
+    map.on(L.Draw.Event.CREATED, function (e) {
+      const layer = e.layer;
+      drawnItems.clearLayers();
       drawnItems.addLayer(layer);
 
       const geojson = layer.toGeoJSON();
-      console.log('Geometria desenhada:', geojson);
+      const event = new CustomEvent('geometryDrawn', { detail: geojson.geometry });
+      document.dispatchEvent(event);
+    });
 
-      const customEvent = new CustomEvent('geometryDrawn', { detail: geojson.geometry });
-      document.dispatchEvent(customEvent);
+    // Optional: allow click events to select burned areas
+    map.on('click', function (e) {
+      const { lat, lng } = e.latlng;
+      const event = new CustomEvent('mapClicked', { detail: { lat, lon: lng } });
+      document.dispatchEvent(event);
     });
   });
 
+  // Add burned area layer to map
   export function addBurnedAreaLayer(id: string, geojson: any, options: { color: string; fillOpacity: number }) {
+    if (!map) return;
+
     if (geoJsonLayers[id]) {
       map.removeLayer(geoJsonLayers[id]);
     }
@@ -67,30 +80,31 @@
         fillOpacity: options.fillOpacity
       },
       onEachFeature: (feature, layer) => {
-        if (feature.properties) {
-          const props = feature.properties;
-          const area = props.area_ha || props.area_ht || 'N/A';
-          const date = props.fire_date || props.data_inici || 'Data desconhecida';
+        const props = feature.properties || {};
+        const area = props.area_ha || props.area_ht || 'N/A';
+        const date = props.fire_date || props.data_inici || 'Data desconhecida';
 
-          layer.bindPopup(`
-            <strong>Data:</strong> ${date}<br/>
-            <strong>Área Ardida:</strong> ${area} ha
-          `);
-        }
+        layer.bindPopup(`
+          <strong>Data:</strong> ${date}<br/>
+          <strong>Área Ardida:</strong> ${area} ha
+        `);
       }
     }).addTo(map);
 
     geoJsonLayers[id] = layer;
   }
 
+  // Remove burned area layer
   export function removeBurnedAreaLayer(id: string) {
-    if (geoJsonLayers[id]) {
-      map.removeLayer(geoJsonLayers[id]);
-      delete geoJsonLayers[id];
-    }
+    if (!map || !geoJsonLayers[id]) return;
+    map.removeLayer(geoJsonLayers[id]);
+    delete geoJsonLayers[id];
   }
 
+  // Add composite image tile layer
   export function addCompositeImageLayer(tileUrl: string) {
+    if (!map) return;
+
     if (imageLayer) {
       map.removeLayer(imageLayer);
     }
@@ -100,28 +114,33 @@
       tileSize: 256,
       detectRetina: true,
       tms: false,
-      crossOrigin: true,
+      crossOrigin: true
     }).addTo(map);
   }
 
+  // Return current drawn geometry
   export function getSelectedGeometry() {
-    if (drawnItems.getLayers().length === 0) {
-      return null;
-    }
+    if (!map || !drawnItems || drawnItems.getLayers().length === 0) return null;
     return drawnItems.getLayers()[0].toGeoJSON().geometry;
   }
 
+  // Clear all drawings
   export function clearDrawing() {
+    if (!map || !drawnItems) return;
     drawnItems.clearLayers();
   }
 </script>
 
-<div id="map" style="width: 100%; height: 100%;"></div>
+<div id="map" style="width: 100%; height: 100%; min-height: 400px;"></div>
 
 <style>
   #map {
     width: 100%;
     height: 100%;
+    min-height: 400px;
     z-index: 0;
+  }
+  .leaflet-draw {
+    z-index: 1000;
   }
 </style>

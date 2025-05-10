@@ -1,20 +1,21 @@
-// src/lib/components/charts/TimeSeriesChart.svelte
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import Chart from 'chart.js/auto';
+  import 'chartjs-adapter-date-fns';
   
-  export let title = '';
-  export let data: Array<{ x: Date, y: number }> = [];
-  export let xAxisLabel = 'Data';
-  export let yAxisLabel = 'Valor';
-  export let color = '#D4381D';
+  export let title: string = '';
+  export let data: { x: Date; y: number }[] = [];
+  export let xAxisLabel: string = 'Data';
+  export let yAxisLabel: string = 'Valor';
+  export let color: string = '#D4381D';
   
   let chartCanvas: HTMLCanvasElement;
   let chart: Chart;
   
   $: if (chart && data) {
-    updateChart();
-  }
+  console.log('Atualizando gráfico com dados:', data);
+  updateChart();
+}
   
   onMount(() => {
     createChart();
@@ -27,6 +28,7 @@
   });
   
   function createChart() {
+    
     if (!chartCanvas) return;
     
     const ctx = chartCanvas.getContext('2d');
