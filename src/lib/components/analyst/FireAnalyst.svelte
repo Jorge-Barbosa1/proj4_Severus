@@ -20,11 +20,11 @@
 
   function getSatelliteKey(label: string): string {
     const map = {
-      'Terra/MODIS': 'MODIS',
-      'Landsat-5/TM': 'Landsat5',
-      'Landsat-7/ETM': 'Landsat7',
-      'Landsat-8/OLI': 'Landsat8',
-      'Sentinel-2/MSI': 'Sentinel2'
+      'MODIS': 'MODIS/061/MOD09A1',
+      'Landsat-5': 'LANDSAT/LT05/C02/T1_L2',
+      'Landsat-7': 'LANDSAT/LE07/C02/T1_L2',
+      'Landsat-8': 'LANDSAT/LC08/C02/T1_L2',
+      'Sentinel-2': 'COPERNICUS/S2_SR_HARMONIZED'
     };
       return map[label] ?? label;
     }
@@ -81,6 +81,14 @@
     }
     isLoading = true;
     try {
+      console.log('Params:', {
+        satellite: getSatelliteKey(satellite),
+        index,
+        fireDate,
+        windowSize: analysisRangeDays,
+        geometry
+      });
+
       const res = await fetch('/api/gee/severity', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
