@@ -33,7 +33,7 @@ export const POST: RequestHandler = async ({ request }) => {
       NBR: ['B8', 'B12']
     };
 
-    const scaleMap = {
+    const scaleMap: Record<string, number> = {
       'Terra/MODIS': 500,
       'Landsat-5/TM': 30,
       'Landsat-7/ETM': 30,
@@ -41,6 +41,8 @@ export const POST: RequestHandler = async ({ request }) => {
       'Sentinel-2/MSI': 20
     };
 
+    const scale = scaleMap[satellite] ?? 30; // fallback padrão
+    
     const collectionId = collections[satellite];
     if (!collectionId) throw new Error(`Satélite não suportado: ${satellite}`);
 
@@ -81,7 +83,7 @@ export const POST: RequestHandler = async ({ request }) => {
     const reducer = bandsImg.reduceRegion({
       reducer: ee.Reducer.median(),
       geometry: region,
-      scale: scaleMap[satellite] ?? 30,
+      scale: scale,
       maxPixels: 1e13
     });
 

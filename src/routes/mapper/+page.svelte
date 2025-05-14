@@ -1,33 +1,33 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import { browser } from '$app/environment';
-
-  /* ---------- estado ---------- */
-  let map;
-  let drawControl;
-  let drawnItems;
-  let L; // Referência ao Leaflet que será carregada apenas no browser
+  import Map from '$lib/components/map/Map.svelte';
+  import SeverityMapper from '$lib/components/map/SeverityMapper.svelte';  
+  
+  let mapComponent: Map;
+  
   let selectedDataset = '';
   let selectedYear = '';
   let selectedSatellite = '';
   let selectedIndex = '';
-  let startDate = new Date().toISOString().split('T')[0];
-  let endDate = new Date().toISOString().split('T')[0];
+  let preFireStart = new Date().toISOString().split('T')[0];
+  let preFireEnd = new Date().toISOString().split('T')[0];
+  let postFireStart = new Date().toISOString().split('T')[0];
+  let postFireEnd = new Date().toISOString().split('T')[0];
+  let applySegmentation = false;
+  let selectedGeometry: any = null;
   let isLoading = false;
-  let inputMethod = 'draw';
-  let lonCoord = '';
-  let latInput = '';
-  let bufferRadius = '';
+  let isDarkMode = false;
+  let sidebarOpen = true;
+  let showAdvancedOptions = false;
   
   type BurnedLayer = { id: string; label: string; year: string; visible: boolean };
   let burnedLayers: BurnedLayer[] = [];
-  let overlayLayers = {};
-  let compositeLayer = null;
-
-  /* ---------- listas ---------- */
+  
   const datasets = ['ICNF burned areas', 'EFFIS burned areas'];
   const icnfYears = Array.from({ length: 22 }, (_, i) => (2000 + i).toString());
   const effisYears = [...icnfYears, '2022', '2023'];
+  
   const satelliteLabels = {
     MODIS: 'Terra/MODIS',
     Landsat5: 'Landsat-5/TM',
@@ -35,667 +35,1068 @@
     Landsat8: 'Landsat-8/OLI',
     Sentinel2: 'Sentinel-2/MSI'
   };
+  
   const satellites = Object.values(satelliteLabels);
   const indices = ['NBR', 'NDVI'];
   $: years = selectedDataset === 'ICNF burned areas' ? icnfYears : effisYears;
-
-  /* ---------- helpers de UI ---------- */
-  const setInputMethodDraw = () => (inputMethod = 'draw');
-  const setInputMethodSelect = () => (inputMethod = 'select');
-  const setInputMethodCoords = () => (inputMethod = 'coords');
-
-  onMount(async () => {
-    if (browser) {
-      // Importar Leaflet dinamicamente (somente no navegador)
-      L = await import('leaflet');
-      await import('leaflet/dist/leaflet.css');
-      
-      // Importar Leaflet Draw 
-      const leafletDraw = await import('leaflet-draw');
-      await import('leaflet-draw/dist/leaflet.draw.css');
-
-      // Inicializar o mapa após carregar os módulos
-      initMap();
-
-      // Adicionar listener para desenho de geometria
-      document.addEventListener('geometryDrawn', (e) => {
-        console.log('Geometria desenhada:', e.detail);
-      });
-    }
-  });
-
-  onDestroy(() => {
-    if (browser) {
-      document.removeEventListener('geometryDrawn', () => {});
-      
-      // Limpar o mapa
-      if (map) {
-        map.remove();
-      }
-    }
-  });
-
-  function initMap() {
-    // Criar mapa
-    map = L.map('map').setView([39.5, -8], 7);
-
-    // Adicionar camada base
-    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
-
-    const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+  
+  onMount(() => {
+    if (!browser) return;
+    
+    document.addEventListener('geometryDrawn', (e: any) => {
+      selectedGeometry = e.detail;
     });
-
-    // Configurar camadas base
-    const baseMaps = {
-      "OpenStreetMap": osmLayer,
-      "Satellite": satelliteLayer
-    };
-
-    // Adicionar controle de camadas
-    L.control.layers(baseMaps, overlayLayers).addTo(map);
-
-    // Configurar Leaflet.Draw
-    drawnItems = new L.FeatureGroup();
-    map.addLayer(drawnItems);
-
-    drawControl = new L.Control.Draw({
-      draw: {
-        polyline: false,
-        circle: true,
-        circlemarker: false,
-        marker: false
-      },
-      edit: {
-        featureGroup: drawnItems
+    
+    document.addEventListener('mapClicked', async (e: any) => {
+      const { lat, lon } = e.detail;
+      if (!selectedDataset || !selectedYear) return;
+      try {
+        isLoading = true;
+        const res = await fetch('/api/gee/mapper', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lat,
+            lon,
+            dataset: selectedDataset === 'ICNF burned areas' ? 'ICNF' : 'EFFIS',
+            year: parseInt(selectedYear)
+          })
+        });
+        
+        const feature = await res.json();
+        selectedGeometry = feature.geometry;
+        
+        // Set pre and post fire dates based on the fire date
+        const fireDate = feature.properties.fire_date || feature.properties.data_inici || '';
+        if (fireDate) {
+          const fireDateObj = new Date(fireDate);
+          
+          // Pre-fire: 30 days before the fire
+          const preFireStartObj = new Date(fireDateObj);
+          preFireStartObj.setDate(preFireStartObj.getDate() - 30);
+          preFireStart = preFireStartObj.toISOString().split('T')[0];
+          
+          // Pre-fire end: 1 day before the fire
+          const preFireEndObj = new Date(fireDateObj);
+          preFireEndObj.setDate(preFireEndObj.getDate() - 1);
+          preFireEnd = preFireEndObj.toISOString().split('T')[0];
+          
+          // Post-fire start: fire date
+          postFireStart = fireDate.split('T')[0];
+          
+          // Post-fire end: 30 days after the fire
+          const postFireEndObj = new Date(fireDateObj);
+          postFireEndObj.setDate(postFireEndObj.getDate() + 30);
+          postFireEnd = postFireEndObj.toISOString().split('T')[0];
+        }
+        
+        mapComponent?.addBurnedAreaLayer('selected-area', {
+          type: 'FeatureCollection',
+          features: [feature]
+        }, { color: 'yellow', fillOpacity: 0.7 });
+      } catch (err) {
+        console.error(err);
+      } finally {
+        isLoading = false;
       }
     });
-
-    map.addControl(drawControl);
-
-    // Event listener para quando um polígono é desenhado
-    map.on(L.Draw.Event.CREATED, function(e) {
-      const layer = e.layer;
-      drawnItems.clearLayers();
-      drawnItems.addLayer(layer);
-
-      // Disparar evento personalizado
-      const event = new CustomEvent('geometryDrawn', { detail: layer });
-      document.dispatchEvent(event);
-    });
-  }
-
-  // Função para adicionar camada de área queimada
+  });
+  
   async function addLayerToMap() {
-    if (!selectedDataset || !selectedYear) {
-      alert('Selecione um conjunto de dados e um ano.');
-      return;
-    }
-
+    if (!selectedDataset || !selectedYear) return;
     isLoading = true;
-
     try {
-      console.log(`Buscando dados para ${selectedDataset} ${selectedYear}`);
-
-      // Aqui você faria uma chamada real à API
-      // const response = await fetch('/api/gee/burned-areas', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({
-      //     datasetType: selectedDataset === 'ICNF burned areas' ? 'ICNF' : 'EFFIS',
-      //     year: parseInt(selectedYear)
-      //   })
-      // });
-      // const data = await response.json();
-
-      // Simular resposta para demonstração
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      const mockGeoJSON = createMockBurnedAreaData(selectedDataset, selectedYear);
-
-      // ID único para a camada
-      const layerId = `${selectedDataset}-${selectedYear}`;
-
-      // Verificar se a camada já existe
-      const existingLayerIndex = burnedLayers.findIndex(l => l.id === layerId);
-
-      if (existingLayerIndex !== -1) {
-        // Remover camada existente do mapa se estiver presente
-        if (overlayLayers[layerId]) {
-          map.removeLayer(overlayLayers[layerId]);
-        }
+      const dsType = selectedDataset === 'ICNF burned areas' ? 'ICNF' : 'EFFIS';
+      const res = await fetch('/api/gee/burned-areas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataset: dsType, year: parseInt(selectedYear) })
+      });
+      const geojson = await res.json();
+      const id = `${selectedDataset}-${selectedYear}`;
+      mapComponent?.addBurnedAreaLayer(id, geojson, {
+        color: dsType === 'ICNF' ? 'red' : 'black',
+        fillOpacity: 0.5
+      });
+      if (!burnedLayers.find(l => l.id === id)) {
+        burnedLayers = [...burnedLayers, { id, label: selectedDataset, year: selectedYear, visible: true }];
       }
-
-      // Criar camada Leaflet
-      const color = selectedDataset === 'ICNF burned areas' ? '#d35400' : '#2c3e50';
-      const layer = L.geoJSON(mockGeoJSON, {
-        style: {
-          color: color,
-          weight: 2,
-          opacity: 0.8,
-          fillOpacity: 0.4,
-          fillColor: color
-        }
-      }).addTo(map);
-
-      // Adicionar camada ao controle de camadas
-      overlayLayers[layerId] = layer;
-
-      // Atualizar controle de camadas
-      L.control.layers(
-        {
-          "OpenStreetMap": map._layers[Object.keys(map._layers)[0]],
-          "Satellite": L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}')
-        }, 
-        overlayLayers
-      ).addTo(map);
-
-      // Adicionar à lista de camadas
-      if (existingLayerIndex === -1) {
-        burnedLayers = [...burnedLayers, {
-          id: layerId,
-          label: selectedDataset,
-          year: selectedYear,
-          visible: true
-        }];
-      } else {
-        burnedLayers[existingLayerIndex].visible = true;
-        burnedLayers = [...burnedLayers]; // Atualiza a referência para rerendering
-      }
-
-      // Mudar para método de seleção
-      inputMethod = 'select';
-
-    } catch (error) {
-      console.error(error);
-      alert(`Erro ao carregar dados: ${error.message}`);
+    } catch (err) {
+      console.error(err);
     } finally {
       isLoading = false;
     }
   }
-
-  // Função para alternar visibilidade de camada
-  function toggleLayerVisibility(layer) {
+  
+  function toggleLayerVisibility(layer: BurnedLayer) {
     layer.visible = !layer.visible;
-    burnedLayers = [...burnedLayers]; // Força atualização da UI
-
-    if (layer.visible) {
-      // Mostrar camada se estiver no mapa
-      if (overlayLayers[layer.id]) {
-        map.addLayer(overlayLayers[layer.id]);
-      } else {
-        // Recarregar camada
-        selectedDataset = layer.label;
-        selectedYear = layer.year;
-        addLayerToMap();
-      }
-    } else {
-      // Esconder camada
-      if (overlayLayers[layer.id]) {
-        map.removeLayer(overlayLayers[layer.id]);
-      }
-    }
+    if (layer.visible) addLayerToMap();
+    else mapComponent?.removeBurnedAreaLayer(layer.id);
   }
-
-  // Função para exibir imagem composta
-  async function displayImage() {
-    if (!selectedSatellite || !selectedIndex || !startDate || !endDate) {
-      alert('Selecione satélite, índice e datas.');
-      return;
-    }
-
-    isLoading = true;
-
-    try {
-      console.log(`Gerando imagem: ${selectedSatellite}, ${selectedIndex}, ${startDate}-${endDate}`);
-
-      // Aqui você faria uma chamada real à API
-      // const response = await fetch('/api/gee/composite-image', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({
-      //     satellite: selectedSatellite,
-      //     index: selectedIndex,
-      //     startDate,
-      //     endDate
-      //   })
-      // });
-      // const data = await response.json();
-
-      // Simular chamada à API
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      // Remover camada anterior se existir
-      if (compositeLayer) {
-        map.removeLayer(compositeLayer);
-      }
-
-      // Criar uma camada WMS fictícia para demonstração
-      const bounds = [
-        [36.8, -9.6],  // Sudoeste
-        [42.2, -6.2]   // Nordeste
-      ];
-
-      // Simular diferentes visualizações baseadas no índice selecionado
-      // Na implementação real, você usaria as URLs de tile retornadas pela API
-      const tileUrl = selectedIndex === 'NBR' 
-        ? 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png' 
-        : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}';
-
-      // Criar camada de tiles
-      compositeLayer = L.tileLayer(tileUrl, {
-        opacity: 0.6,
-        attribution: 'Demo Layer'
-      }).addTo(map);
-
-      console.log('Imagem adicionada com sucesso!');
-
-    } catch (error) {
-      console.error(error);
-      alert(`Erro ao carregar imagem: ${error.message}`);
-    } finally {
-      isLoading = false;
-    }
-  }
-
-  // Função para criar dados GeoJSON fictícios para demonstração
-  function createMockBurnedAreaData(dataset, year) {
-    // Coordenadas base para Portugal
-    const baseLat = 39.5;
-    const baseLng = -8;
-    
-    // Criar entre 3 e 8 polígonos aleatórios
-    const numPolygons = Math.floor(Math.random() * 6) + 3;
-    
-    const features = [];
-    
-    for (let i = 0; i < numPolygons; i++) {
-      // Criar um polígono "queimado" com forma irregular
-      const centerLat = baseLat + (Math.random() - 0.5) * 3;
-      const centerLng = baseLng + (Math.random() - 0.5) * 3;
-      
-      // Número de pontos no polígono (entre 5 e 10)
-      const numPoints = Math.floor(Math.random() * 6) + 5;
-      
-      // Criar pontos em torno do centro
-      const points = [];
-      for (let j = 0; j < numPoints; j++) {
-        const angle = (j / numPoints) * Math.PI * 2;
-        const radius = 0.05 + Math.random() * 0.1; // Entre 0.05 e 0.15 graus
-        
-        const lat = centerLat + Math.sin(angle) * radius;
-        const lng = centerLng + Math.cos(angle) * radius;
-        
-        points.push([lng, lat]);
-      }
-      
-      // Fechar o polígono
-      points.push([...points[0]]);
-      
-      features.push({
-        type: 'Feature',
-        properties: {
-          id: `${dataset}-${year}-${i}`,
-          area: Math.floor(Math.random() * 5000) + 500,
-          dataset: dataset,
-          year: year
-        },
-        geometry: {
-          type: 'Polygon',
-          coordinates: [points]
-        }
+  
+  function handleMapsGenerated(event: CustomEvent) {
+    const { maps } = event.detail;
+    // You can add the maps to your map component here
+    // For example, you might want to add them as overlay layers
+    if (maps && maps.length > 0) {
+      maps.forEach((map: any, index: number) => {
+        mapComponent?.addTileLayer(`severity-${map.name}`, map.tileUrl, {
+          opacity: 0.7,
+          zIndex: 10 + index
+        });
       });
     }
-    
-    return {
-      type: 'FeatureCollection',
-      features: features
-    };
+  }
+  
+  function toggleDarkMode() {
+    isDarkMode = !isDarkMode;
+    document.body.classList.toggle('dark-mode');
+  }
+  
+  function toggleSidebar() {
+    sidebarOpen = !sidebarOpen;
+  }
+  
+  function toggleAdvancedOptions() {
+    showAdvancedOptions = !showAdvancedOptions;
   }
 </script>
 
-<div class="analyst-container">
-  <h1>Análise de Severidade de Incêndios 🔥</h1>
-  <p class="subtitle">Projeto SeverusPT - Um produto e serviço baseado na web para avaliação e previsão da severidade de incêndios em Portugal Continental (FCT: PCIF/RPG/0170/2019)</p>
-  
-  <div class="main-content">
-    <!-- Painel esquerdo -->
-    <div class="left-panel">
-      <div class="panel-section">
-        <h3>#1 Selecione conjunto de dados de área queimada</h3>
-        <select bind:value={selectedDataset}>
-          <option value="">Selecione conjunto de dados</option>
-          {#each datasets as dataset}
-            <option value={dataset}>{dataset}</option>
-          {/each}
-        </select>
-        
-        <select bind:value={selectedYear}>
-          <option value="">Selecione ano</option>
-          {#each years as year}
-            <option value={year}>{year}</option>
-          {/each}
-        </select>
-        
-        <button on:click={addLayerToMap} disabled={isLoading}>
-          <span class="icon">➕</span> Adicionar camada
-        </button>
-        
-        {#if burnedLayers.length > 0}
-          <div class="burned-layers-list">
-            <h4>Camadas adicionadas</h4>
-            {#each burnedLayers as layer (layer.id)}
-              <div class="layer-item">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={layer.visible}
-                    on:change={() => toggleLayerVisibility(layer)}
-                  />
-                  {layer.label} {layer.year}
-                </label>
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
-      
-      <div class="panel-section">
-        <h3>#2 Selecione sensor, índice e intervalo</h3>
-        <select bind:value={selectedSatellite}>
-          <option value="">Selecione satélite/sensor</option>
-          {#each satellites as satellite}
-            <option value={satellite}>{satellite}</option>
-          {/each}
-        </select>
-        
-        <select bind:value={selectedIndex}>
-          <option value="">Selecione índice espectral</option>
-          {#each indices as index}
-            <option value={index}>{index}</option>
-          {/each}
-        </select>
-        
-        <div class="date-inputs">
-          <label>
-            Data inicial:
-            <input type="date" bind:value={startDate} />
-          </label>
-          
-          <label>
-            Data final:
-            <input type="date" bind:value={endDate} />
-          </label>
-        </div>
-        
-        <button on:click={displayImage} disabled={isLoading}>
-          <span class="icon">🖼️</span> Exibir imagem
-        </button>
-      </div>
-      
-      <div class="panel-section">
-        <h3>#3 Defina área de interesse</h3>
-        
-        <div class="input-method-selector">
-          <button 
-            class:active={inputMethod === 'draw'} 
-            on:click={setInputMethodDraw}
-          >
-            <span class="icon">✏️</span> Desenhar
-          </button>
-          
-          <button 
-            class:active={inputMethod === 'select'} 
-            on:click={setInputMethodSelect}
-          >
-            <span class="icon">🔍</span> Selecionar
-          </button>
-          
-          <button 
-            class:active={inputMethod === 'coords'} 
-            on:click={setInputMethodCoords}
-          >
-            <span class="icon">📍</span> Coordenadas
-          </button>
-        </div>
-        
-        {#if inputMethod === 'coords'}
-          <div class="coords-input">
-            <label>
-              Longitude:
-              <input type="number" bind:value={lonCoord} placeholder="-9.1393" step="0.0001" />
-            </label>
-            
-            <label>
-              Latitude:
-              <input type="number" bind:value={latInput} placeholder="38.7223" step="0.0001" />
-            </label>
-            
-            <label>
-              Raio de buffer (km):
-              <input type="number" bind:value={bufferRadius} placeholder="1" min="0" step="0.1" />
-            </label>
-          </div>
-        {/if}
-      </div>
+<div class="app-container {isDarkMode ? 'dark-theme' : ''} {sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}">
+  <header class="app-header">
+    <div class="toggle-sidebar-btn" on:click={toggleSidebar}>
+      <span></span><span></span><span></span>
     </div>
     
-    <!-- Painel direito -->
-    <div class="right-panel">
-      <div class="map-container">
-        <div id="map"></div>
-      </div>
+    <div class="logo">
+      <span class="logo-flame">🔥</span>
+      <span class="logo-text">SeverusPT</span>
     </div>
+    
+    <div class="header-actions">
+      <button class="theme-toggle" on:click={toggleDarkMode}>
+        {#if isDarkMode}
+          <span class="icon">☀️</span>
+        {:else}
+          <span class="icon">🌙</span>
+        {/if}
+      </button>
+    </div>
+  </header>
+
+  <div class="title-bar">
+    <h1>Mapeamento de Severidade de Incêndios</h1>
+    <p class="project-info">FCT: PCIF/RPG/0170/2019</p>
   </div>
+  
+  <main class="main-content">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2>Painel de Controle</h2>
+      </div>
+      
+      <div class="accordion-panels">
+        <!-- Panel 1: Burned Areas -->
+        <div class="panel active">
+          <div class="panel-heading">
+            <div class="step-indicator">1</div>
+            <h3>Áreas Queimadas</h3>
+            <div class="panel-toggle">▼</div>
+          </div>
+          
+          <div class="panel-content">
+            <div class="form-group">
+              <label for="dataset">Fonte de dados</label>
+              <div class="select-wrapper">
+                <select id="dataset" bind:value={selectedDataset}>
+                  <option value="">Selecione conjunto de dados</option>
+                  {#each datasets as dataset}
+                    <option value={dataset}>{dataset}</option>
+                  {/each}
+                </select>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label for="year">Ano</label>
+              <div class="select-wrapper">
+                <select id="year" bind:value={selectedYear}>
+                  <option value="">Selecione ano</option>
+                  {#each years as year}
+                    <option value={year}>{year}</option>
+                  {/each}
+                </select>
+              </div>
+            </div>
+            
+            <button class="action-button" on:click={addLayerToMap} disabled={isLoading || !selectedDataset || !selectedYear}>
+              <span class="button-icon">+</span>
+              <span class="button-text">Adicionar camada</span>
+            </button>
+            
+            {#if burnedLayers.length > 0}
+              <div class="layers-container">
+                <h4>Camadas ativas <span class="badge">{burnedLayers.length}</span></h4>
+                <div class="layers-list">
+                  {#each burnedLayers as layer (layer.id)}
+                    <div class="layer-card">
+                      <div class="layer-content">
+                        <div class="toggle-switch">
+                          <input 
+                            type="checkbox" 
+                            id={`layer-${layer.id}`} 
+                            bind:checked={layer.visible} 
+                            on:change={() => toggleLayerVisibility(layer)} 
+                          />
+                          <label for={`layer-${layer.id}`}></label>
+                        </div>
+                        <div class="layer-info">
+                          <div class="layer-title">{layer.label}</div>
+                          <div class="layer-year">{layer.year}</div>
+                        </div>
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+          </div>
+        </div>
+        
+        <!-- Panel 2: Satellite Selection -->
+        <div class="panel active">
+          <div class="panel-heading">
+            <div class="step-indicator">2</div>
+            <h3>Satélite e Datas</h3>
+            <div class="panel-toggle">▼</div>
+          </div>
+          
+          <div class="panel-content">
+            <div class="form-group">
+              <label for="satellite">Satélite/Sensor</label>
+              <div class="select-wrapper">
+                <select id="satellite" bind:value={selectedSatellite}>
+                  <option value="">Selecione satélite/sensor</option>
+                  {#each satellites as satellite}
+                    <option value={satellite}>{satellite}</option>
+                  {/each}
+                </select>
+              </div>
+            </div>
+            
+            <div class="date-section">
+              <h4>Período Pré-Incêndio</h4>
+              <div class="date-group">
+                <div class="form-group">
+                  <label for="pre-fire-start">Data inicial</label>
+                  <input id="pre-fire-start" type="date" bind:value={preFireStart} />
+                </div>
+                
+                <div class="form-group">
+                  <label for="pre-fire-end">Data final</label>
+                  <input id="pre-fire-end" type="date" bind:value={preFireEnd} />
+                </div>
+              </div>
+              
+              <h4>Período Pós-Incêndio</h4>
+              <div class="date-group">
+                <div class="form-group">
+                  <label for="post-fire-start">Data inicial</label>
+                  <input id="post-fire-start" type="date" bind:value={postFireStart} />
+                </div>
+                
+                <div class="form-group">
+                  <label for="post-fire-end">Data final</label>
+                  <input id="post-fire-end" type="date" bind:value={postFireEnd} />
+                </div>
+              </div>
+            </div>
+            
+            <div class="advanced-options">
+              <button class="toggle-advanced" on:click={toggleAdvancedOptions}>
+                {showAdvancedOptions ? '▼' : '►'} Opções avançadas
+              </button>
+              
+              {#if showAdvancedOptions}
+                <div class="advanced-content">
+                  <div class="form-group">
+                    <label class="checkbox-label">
+                      <input type="checkbox" bind:checked={applySegmentation} />
+                      <span>Aplicar segmentação de áreas queimadas</span>
+                    </label>
+                    <p class="help-text">Remove pequenas áreas e suaviza os resultados</p>
+                  </div>
+                </div>
+              {/if}
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+    
+    <section class="content-area">
+      <div class="card map-card">
+        <div class="card-header">
+          <h2>Mapa Interativo</h2>
+          <div class="card-actions">
+            <span class="map-tip tooltip">
+              <span class="tooltip-icon">ℹ️</span>
+              <span class="tooltip-text">Clique no mapa para selecionar uma área queimada ou desenhe uma área de interesse</span>
+            </span>
+          </div>
+        </div>
+        
+        <div class="card-body map-container">
+          <Map bind:this={mapComponent} />
+        </div>
+      </div>
+      
+      <div class="card analysis-card">
+        <div class="card-header">
+          <h2>Mapas de Severidade</h2>
+          <div class="card-actions">
+            <span class="stats-badge">NBR</span>
+          </div>
+        </div>
+        
+        <div class="card-body analysis-container">
+          <SeverityMapper
+            geometry={selectedGeometry}
+            satellite={selectedSatellite}
+            preStart={preFireStart}
+            preEnd={preFireEnd}
+            postStart={postFireStart}
+            postEnd={postFireEnd}
+            applySegmentation={applySegmentation}
+            on:mapsGenerated={handleMapsGenerated}
+          />
+        </div>
+      </div>
+    </section>
+  </main>
   
   {#if isLoading}
     <div class="loading-overlay">
-      <div class="spinner"></div>
-      <p>Processando dados...</p>
+      <div class="loader">
+        <svg class="loader-circle" viewBox="0 0 50 50">
+          <circle cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle>
+        </svg>
+        <p>Processando dados...</p>
+      </div>
     </div>
   {/if}
 </div>
 
 <style>
-  .analyst-container {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 20px;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  /* Modern Variables */
+  :root {
+    --primary: #FF4B2B;
+    --primary-light: #FF7A59;
+    --primary-dark: #E62C00;
+    --accent: #5C7CFA;
+    --accent-dark: #4263EB;
+    --success: #20c997;
+    --warning: #fab005;
+    --danger: #fa5252;
+    --dark: #212529;
+    --gray-dark: #343a40;
+    --gray: #495057;
+    --gray-light: #adb5bd;
+    --gray-lighter: #e9ecef;
+    --light: #f8f9fa;
+    --border-radius: 12px;
+    --border-radius-sm: 8px;
+    --border-radius-lg: 16px;
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.1);
+    --shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.1);
+    --transition: all 0.25s cubic-bezier(0.645, 0.045, 0.355, 1);
+    --font-main: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
-  
-  h1 {
-    color: #d35400;
-    text-align: center;
-    margin-bottom: 10px;
-    font-weight: 700;
+
+  /* Dark theme variables */
+  .dark-theme {
+    --bg-primary: #121212;
+    --bg-secondary: #1e1e1e;
+    --bg-card: #2d2d2d;
+    --text-primary: #f8f9fa;
+    --text-secondary: #adb5bd;
+    --border-color: #444;
   }
-  
-  .subtitle {
-    text-align: center;
-    color: #555;
-    margin-bottom: 30px;
-    font-size: 0.9em;
+
+  /* Light theme variables (default) */
+  :root {
+    --bg-primary: #fafafa;
+    --bg-secondary: #ffffff;
+    --bg-card: #ffffff;
+    --text-primary: #212529;
+    --text-secondary: #495057;
+    --border-color: #e9ecef;
   }
-  
-  .main-content {
-    display: flex;
-    gap: 20px;
+
+  /* Global styles */
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
   }
-  
-  .left-panel {
-    flex: 0 0 350px;
+
+  body {
+    font-family: var(--font-main);
+    line-height: 1.5;
+    color: var(--text-primary);
+    background-color: var(--bg-primary);
+    margin: 0;
+    transition: background-color 0.3s ease;
+  }
+
+  /* App Container */
+  .app-container {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    min-height: 100vh;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    transition: var(--transition);
   }
-  
-  .panel-section {
-    background-color: #fff;
-    border-radius: 8px;
-    padding: 20px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-  }
-  
-  h3 {
-    margin-top: 0;
-    color: #2c3e50;
-    border-bottom: 1px solid #eee;
-    padding-bottom: 12px;
-    margin-bottom: 15px;
-    font-size: 1.1em;
-  }
-  
-  select, input {
-    width: 100%;
-    padding: 10px;
-    margin-bottom: 12px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    font-size: 14px;
-  }
-  
-  select:focus, input:focus {
-    outline: none;
-    border-color: #3498db;
-  }
-  
-  button {
-    width: 100%;
-    padding: 12px;
-    background-color: #3498db;
+
+  /* Header */
+  .app-header {
+    background: linear-gradient(120deg, var(--primary), var(--primary-dark));
     color: white;
-    border: none;
-    border-radius: 4px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    box-shadow: var(--shadow);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 700;
+    font-size: 1.5rem;
+  }
+
+  .logo-flame {
+    font-size: 1.75rem;
+  }
+
+  .logo-text {
+    letter-spacing: 0.5px;
+  }
+
+  .toggle-sidebar-btn {
+    width: 30px;
+    height: 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
     cursor: pointer;
-    margin-top: 10px;
-    transition: all 0.2s ease;
+  }
+
+  .toggle-sidebar-btn span {
+    display: block;
+    height: 3px;
+    width: 100%;
+    background-color: white;
+    border-radius: 3px;
+    transition: var(--transition);
+  }
+
+  .sidebar-closed .toggle-sidebar-btn span:nth-child(1) {
+    transform: translateY(10px) rotate(45deg);
+  }
+
+  .sidebar-closed .toggle-sidebar-btn span:nth-child(2) {
+    opacity: 0;
+  }
+
+  .sidebar-closed .toggle-sidebar-btn span:nth-child(3) {
+    transform: translateY(-10px) rotate(-45deg);
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 16px;
+  }
+
+  .theme-toggle {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 1.25rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background-color: rgba(255, 255, 255, 0.15);
+    transition: var(--transition);
+  }
+
+  .theme-toggle:hover {
+    background-color: rgba(255, 255, 255, 0.25);
+  }
+
+  /* Title Bar */
+  .title-bar {
+    padding: 24px;
+    text-align: center;
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .title-bar h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .project-info {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }
+
+  /* Main Content */
+  .main-content {
+    display: flex;
+    flex: 1;
+    transition: var(--transition);
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 350px;
+    background-color: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    transition: var(--transition);
+  }
+
+  .sidebar-closed .sidebar {
+    transform: translateX(-350px);
+    width: 0;
+  }
+
+  .sidebar-header {
+    padding: 20px;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .sidebar-header h2 {
+    font-size: 1.25rem;
     font-weight: 600;
+  }
+
+  .accordion-panels {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+  }
+
+  /* Panels */
+  .panel {
+    background-color: var(--bg-card);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    transition: var(--transition);
+  }
+
+  .panel:hover {
+    box-shadow: var(--shadow);
+  }
+
+  .panel-heading {
+    display: flex;
+    align-items: center;
+    padding: 16px;
+    cursor: pointer;
+    background: rgba(0, 0, 0, 0.02);
+    position: relative;
+  }
+
+  .step-indicator {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary), var(--primary-light));
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.85rem;
+    margin-right: 12px;
+  }
+
+  .panel-heading h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    flex: 1;
+  }
+
+  .panel-toggle {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    transition: var(--transition);
+  }
+
+  .panel:not(.active) .panel-toggle {
+    transform: rotate(-90deg);
+  }
+
+  .panel-content {
+    padding: 20px;
+    border-top: 1px solid var(--border-color);
+  }
+
+  .panel:not(.active) .panel-content {
+    display: none;
+  }
+
+  /* Form Elements */
+  .form-group {
+    margin-bottom: 16px;
+  }
+
+  .form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+  }
+
+  .checkbox-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+  }
+
+  .help-text {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    margin-left: 24px;
+  }
+
+  .value-indicator {
+    background-color: var(--accent);
+    color: white;
+    font-size: 0.75rem;
+    padding: 2px 6px;
+    border-radius: 12px;
+  }
+
+  .select-wrapper {
+    position: relative;
+  }
+
+  .select-wrapper:after {
+    content: "▼";
+    position: absolute;
+    top: 50%;
+    right: 15px;
+    transform: translateY(-50%);
+    color: var(--gray);
+    pointer-events: none;
+    font-size: 0.8rem;
+  }
+
+  select {
+    width: 100%;
+    padding: 12px 15px;
+    border-radius: var(--border-radius-sm);
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.95rem;
+    appearance: none;
+    cursor: pointer;
+    transition: var(--transition);
+  }
+
+  select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(92, 124, 250, 0.2);
+  }
+
+  input[type="date"] {
+    width: 100%;
+    padding: 12px 15px;
+    border-radius: var(--border-radius-sm);
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.95rem;
+    transition: var(--transition);
+  }
+
+  input[type="date"]:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(92, 124, 250, 0.2);
+  }
+
+  .date-section {
+    margin-bottom: 20px;
+  }
+
+  .date-section h4 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin: 16px 0 8px 0;
+  }
+
+  .date-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .advanced-options {
+    margin-top: 20px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 16px;
+  }
+
+  .toggle-advanced {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    cursor: pointer;
+    padding: 0;
+    text-align: left;
+    width: 100%;
+    transition: var(--transition);
+  }
+
+  .toggle-advanced:hover {
+    color: var(--text-primary);
+  }
+
+  .advanced-content {
+    margin-top: 12px;
+    padding: 12px;
+    background-color: rgba(0, 0, 0, 0.02);
+    border-radius: var(--border-radius-sm);
+  }
+
+  /* Buttons */
+  .action-button {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
+    width: 100%;
+    padding: 14px;
+    border-radius: var(--border-radius-sm);
+    border: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    color: white;
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition);
+    box-shadow: 0 2px 5px rgba(66, 99, 235, 0.2);
   }
-  
-  button:hover {
-    background-color: #2980b9;
-    transform: translateY(-1px);
+
+  .action-button:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(66, 99, 235, 0.3);
   }
-  
-  button:disabled {
-    background-color: #95a5a6;
+
+  .action-button:disabled {
+    background: var(--gray-light);
     cursor: not-allowed;
-    transform: none;
+    box-shadow: none;
   }
-  
-  button.active {
-    background-color: #27ae60;
+
+  /* Layers */
+  .layers-container {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
   }
-  
-  .input-method-selector {
-    display: flex;
-    gap: 8px;
+
+  .layers-container h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
     margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
-  
-  .input-method-selector button {
-    flex: 1;
-    margin-top: 0;
-    font-size: 13px;
+
+  .badge {
+    background-color: var(--accent);
+    color: white;
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 12px;
+  }
+
+  .layers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 200px;
+    overflow-y: auto;
     padding: 8px;
+    border-radius: var(--border-radius-sm);
+    background-color: rgba(0, 0, 0, 0.02);
   }
-  
-  .right-panel {
+
+  .layer-card {
+    background-color: var(--bg-secondary);
+    border-radius: var(--border-radius-sm);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    transition: var(--transition);
+  }
+
+  .layer-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow);
+  }
+
+  .layer-content {
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .layer-info {
+    flex: 1;
+  }
+
+  .layer-title {
+    font-weight: 500;
+    font-size: 0.9rem;
+  }
+
+  .layer-year {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+  }
+
+  /* Custom Toggle Switch */
+  .toggle-switch {
+    position: relative;
+    width: 42px;
+    height: 22px;
+  }
+
+  .toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .toggle-switch label {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--gray-light);
+    cursor: pointer;
+    border-radius: 34px;
+    transition: var(--transition);
+  }
+
+  .toggle-switch label:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    border-radius: 50%;
+    transition: var(--transition);
+  }
+
+  .toggle-switch input:checked + label {
+    background-color: var(--accent);
+  }
+
+  .toggle-switch input:checked + label:before {
+    transform: translateX(20px);
+  }
+
+  /* Content Area */
+  .content-area {
     flex: 1;
     display: flex;
     flex-direction: column;
+    padding: 20px;
     gap: 20px;
+    background-color: var(--bg-primary);
+    transition: var(--transition);
   }
-  
-  .map-container {
-    height: 600px;
-    background-color: #f8f9fa;
-    border-radius: 8px;
+
+  .card {
+    background-color: var(--bg-card);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
     overflow: hidden;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    transition: var(--transition);
   }
-  
-  #map {
-    width: 100%;
-    height: 100%;
-  }
-  
-  .date-inputs {
+
+  .card-header {
     display: flex;
-    gap: 10px;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
   }
-  
+
+  .card-header h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+
+  .card-actions {
+    display: flex;
+    gap: 12px;
+  }
+
+  .map-container {
+    height: 400px;
+    width: 100%;
+  }
+
+  .analysis-container {
+    padding: 20px;
+  }
+
+  .stats-badge {
+    background-color: var(--primary);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 16px;
+    font-size: 0.75rem;
+    font-weight: 500;
+  }
+
+  .tooltip {
+    position: relative;
+    display: inline-block;
+    cursor: help;
+  }
+
+  .tooltip-text {
+    visibility: hidden;
+    background-color: var(--dark);
+    color: #fff;
+    text-align: center;
+    border-radius: 6px;
+    padding: 8px;
+    position: absolute;
+    z-index: 1;
+    bottom: 125%;
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity 0.3s;
+    width: max-content;
+    max-width: 200px;
+  }
+
+  .tooltip:hover .tooltip-text {
+    visibility: visible;
+    opacity: 1;
+  }
+
+  .tooltip-icon {
+    font-size: 1rem;
+  }
+
+  /* Loading Overlay */
   .loading-overlay {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(0, 0, 0, 0.7);
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 9999;
     display: flex;
-    flex-direction: column;
     justify-content: center;
     align-items: center;
-    z-index: 1000;
+    flex-direction: column;
     color: white;
   }
-  
-  .spinner {
-    border: 5px solid rgba(255, 255, 255, 0.3);
-    border-radius: 50%;
-    border-top: 5px solid white;
+
+  .loader {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .loader-circle {
     width: 50px;
     height: 50px;
-    animation: spin 1s linear infinite;
-    margin-bottom: 20px;
+    animation: rotate 2s linear infinite;
   }
-  
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+
+  .loader-circle circle {
+    stroke: white;
+    stroke-linecap: round;
+    stroke-dasharray: 100;
+    stroke-dashoffset: 75;
+    transform-origin: center;
+    animation: dash 1.5s ease-in-out infinite;
   }
-  
-  .burned-layers-list {
-    margin-top: 10px;
-    padding-top: 10px;
-    border-top: 1px solid #eee;
-  }
-  
-  .layer-item {
-    margin-bottom: 8px;
-    font-size: 0.9em;
-    display: flex;
-    align-items: center;
-  }
-  
-  .layer-item input[type="checkbox"] {
-    width: auto;
-    margin-right: 8px;
-    margin-bottom: 0;
-  }
-  
-  .icon {
-    display: inline-block;
-    width: 16px;
-    height: 16px;
-    margin-right: 6px;
-  }
-  
-  @media (max-width: 1200px) {
-    .main-content {
-      flex-direction: column;
+
+  @keyframes rotate {
+    100% {
+      transform: rotate(360deg);
     }
-    
-    .left-panel {
-      flex: none;
-      width: 100%;
+  }
+
+  @keyframes dash {
+    0% {
+      stroke-dashoffset: 100;
+    }
+    50% {
+      stroke-dashoffset: 25;
+    }
+    100% {
+      stroke-dashoffset: 100;
     }
   }
 </style>

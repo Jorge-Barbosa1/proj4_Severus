@@ -1,4 +1,6 @@
 import { getEE } from '$lib/utils/gee-utils';
+import ee from '@google/earthengine';
+
 
 // Types for function parameters
 type TimeSeriesParams = {
@@ -221,4 +223,57 @@ export async function loadSeverityChart(
     console.error('Error in loadSeverityChart:', err);
     return null;
   }
+}
+
+export async function generateSeverityMaps({
+  satellite,
+  geometry,
+  preStart,
+  preEnd,
+  postStart,
+  postEnd,
+  applySegmentation = false
+}: {
+  satellite: string;
+  geometry: GeoJSON.Geometry;
+  preStart: string;
+  preEnd: string;
+  postStart: string;
+  postEnd: string;
+  applySegmentation?: boolean;
+}): Promise<any> {
+  const ee = await getEE();
+  const region = ee.Geometry(geometry);
+
+  const col = getImageCollection(ee, satellite, 'NBR').filterBounds(region);
+
+  const scale = getScaleForSatellite(satellite);
+
+  // PRE e POST composites
+  const pre = col.filterDate(preStart, preEnd).median();
+  const post = col.filterDate(postStart, postEnd).median();
+
+  // dNBR, RdNBR, RBR
+  const dNBR = pre.subtract(post).rename('dNBR');
+  const rdNBR = dNBR.divide(pre.sqrt()).rename('rdNBR');
+  const rbr = dNBR.divide(pre.add(1.001)).rename('rbr');
+
+  // Classificação
+  const classified = dNBR
+    .where(dNBR.lte(0.1), 1)
+    .where(dNBR.gt(0.1).and(dNBR.lte(0.27)), 2)
+    .where(dNBR.gt(0.27).and(dNBR.lte(0.44)), 3)
+    .where(dNBR.gt(0.44).and(dNBR.lte(0.66)), 4)
+    .where(dNBR.gt(0.66), 5)
+    .rename('severity')
+    .toInt16();
+
+  const result = {
+    deltaNBR: dNBR,
+    rdNBR,
+    rbr,
+    classified
+  };
+
+  return result;
 }
