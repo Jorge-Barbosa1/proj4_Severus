@@ -1,251 +1,256 @@
 <script lang="ts">
   import { onMount, createEventDispatcher } from 'svelte';
-  import { generateSeverityMaps } from '$lib/services/gee-service';
-  import type { GeoJSON } from 'geojson';
+  import { browser } from '$app/environment';
   
-  // Component props
-  export let geometry: GeoJSON.Geometry | null = null;
-  export let satellite: string = '';
-  export let preStart: string = '';
-  export let preEnd: string = '';
-  export let postStart: string = '';
-  export let postEnd: string = '';
-  export let applySegmentation: boolean = false;
+  // Props
+  export let geometry = null;
+  export let satellite = '';
+  export let preStart = '';
+  export let preEnd = '';
+  export let postStart = '';
+  export let postEnd = '';
+  export let applySegmentation = false;
   
-  // State variables
+  // State
   let isLoading = false;
-  let error: string | null = null;
-  let maps: { name: string; tileUrl: string }[] = [];
-  let activeMapIndex = 0;
-  let stats: any = null;
+  let severityMaps = [];
+  let error = null;
+  let debugInfo = null;
   
-  // Constants
-  const mapLabels = {
-    dNBR: 'Delta NBR',
-    RdNBR: 'Relativized Delta NBR',
-    RBR: 'Relative Burn Ratio',
-    Severity: 'Burn Severity Classes'
-  };
-  
-  const severityClasses = [
-    { value: 1, label: 'Unburnt/Very-low', color: '#3385ff' },
-    { value: 2, label: 'Low', color: '#ffff4d' },
-    { value: 3, label: 'Moderate', color: '#ff8000' },
-    { value: 4, label: 'High', color: '#b30000' },
-    { value: 5, label: 'Very-high', color: '#330000' }
-  ];
-  
+  // Event dispatcher
   const dispatch = createEventDispatcher();
   
-  // Watch for changes in props to trigger map generation
-  $: if (geometry && satellite && preStart && preEnd && postStart && postEnd) {
-    generateMaps();
+  // Format dates for display
+  $: formattedPreFire = preStart && preEnd ? `${formatDate(preStart)} to ${formatDate(preEnd)}` : '';
+  $: formattedPostFire = postStart && postEnd ? `${formatDate(postStart)} to ${formatDate(postEnd)}` : '';
+  
+  function formatDate(dateString) {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toISOString().split('T')[0];
   }
   
-  async function generateMaps() {
-    if (!geometry || !satellite) return;
+  // Function to generate severity maps
+  async function generateSeverityMaps() {
+    if (!geometry || !satellite) {
+      error = 'Please select a geometry and satellite before generating maps';
+      return;
+    }
     
     try {
       isLoading = true;
       error = null;
+      debugInfo = null;
       
-      const response = await fetch('/api/gee/severity-maps', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          geometry,
-          satellite,
-          preStart,
-          preEnd,
-          postStart,
-          postEnd,
-          applySegmentation
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to generate severity maps');
-      }
-      
-      const data = await response.json();
-      maps = data.maps;
-      
-      // If we have statistics, update them
-      if (data.stats) {
-        stats = data.stats;
-      }
-      
-      // Dispatch event with the maps data
-      dispatch('mapsGenerated', { maps });
-      
-    } catch (err) {
-      console.error('Error generating severity maps:', err);
-      error = err instanceof Error ? err.message : 'Unknown error';
-    } finally {
-      isLoading = false;
-    }
-  }
-  
-  function setActiveMap(index: number) {
-    activeMapIndex = index;
-  }
-  
-  function downloadMap(index: number) {
-    if (!maps[index]) return;
-    
-    const mapName = maps[index].name;
-    const downloadUrl = `/api/gee/download?type=${mapName}&satellite=${satellite}&preStart=${preStart}&preEnd=${preEnd}&postStart=${postStart}&postEnd=${postEnd}`;
-    
-    window.open(downloadUrl, '_blank');
-  }
-  
-  function calculateStats() {
-    if (!geometry || !satellite) return;
-    
-    fetch('/api/gee/severity-stats', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      // Prepare the request payload
+      const payload = {
         geometry,
         satellite,
         preStart,
         preEnd,
         postStart,
-        postEnd
-      })
-    })
-    .then(response => {
-      if (!response.ok) throw new Error('Failed to calculate statistics');
-      return response.json();
-    })
-    .then(data => {
-      stats = data;
-      dispatch('statsCalculated', { stats });
-    })
-    .catch(err => {
-      console.error('Error calculating statistics:', err);
-      error = err instanceof Error ? err.message : 'Unknown error';
-    });
+        postEnd,
+        applySegmentation
+      };
+      
+      // Log the request payload for debugging
+      console.log('Request payload:', payload);
+      
+      const response = await fetch('/api/gee/severity-maps', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      // Get response text for debugging
+      const responseText = await response.text();
+      
+      if (!response.ok) {
+        // Try to parse the error response as JSON
+        let errorMessage = `API error: ${response.status}`;
+        try {
+          const errorData = JSON.parse(responseText);
+          if (errorData.error) {
+            errorMessage = errorData.error;
+          }
+        } catch (e) {
+          // If parsing fails, use the raw response text
+          debugInfo = responseText;
+        }
+        throw new Error(errorMessage);
+      }
+      
+      // Parse the successful response
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        throw new Error('Invalid JSON response from server');
+      }
+      
+      if (data.maps && data.maps.length > 0) {
+        severityMaps = data.maps;
+        
+        // Use placeholder images for testing
+        severityMaps = severityMaps.map(map => ({
+          ...map,
+          previewUrl: map.previewUrl || `https://via.placeholder.com/300x200?text=${encodeURIComponent(map.name)}`
+        }));
+        
+        dispatch('mapsGenerated', { maps: severityMaps });
+      } else {
+        error = 'No severity maps were generated';
+        debugInfo = JSON.stringify(data, null, 2);
+      }
+    } catch (err) {
+      console.error('Error generating severity maps:', err);
+      error = err.message || 'Failed to generate severity maps';
+    } finally {
+      isLoading = false;
+    }
   }
 </script>
 
 <div class="severity-mapper">
-  {#if isLoading}
-    <div class="loading-indicator">
-      <div class="spinner"></div>
-      <p>Generating severity maps...</p>
+  {#if !geometry}
+    <div class="info-message">
+      <p>Select a burned area on the map or draw a polygon to define the area of interest.</p>
     </div>
-  {:else if error}
-    <div class="error-message">
-      <p>Error: {error}</p>
-      <button on:click={generateMaps}>Retry</button>
+  {:else if !satellite}
+    <div class="info-message">
+      <p>Select a satellite/sensor to continue.</p>
     </div>
-  {:else if maps.length > 0}
-    <div class="maps-container">
-      <div class="map-tabs">
-        {#each maps as map, i}
-          <button 
-            class="tab-button {i === activeMapIndex ? 'active' : ''}" 
-            on:click={() => setActiveMap(i)}
-          >
-            {mapLabels[map.name] || map.name}
-          </button>
-        {/each}
-      </div>
+  {:else}
+    <div class="severity-controls">
+      <button 
+        class="generate-button" 
+        on:click={generateSeverityMaps} 
+        disabled={isLoading || !geometry || !satellite}
+      >
+        {isLoading ? 'Generating...' : 'Generate Severity Map'}
+      </button>
       
-      <div class="map-display">
-        {#if maps[activeMapIndex]}
-          <div class="map-info">
-            <h3>{mapLabels[maps[activeMapIndex].name] || maps[activeMapIndex].name}</h3>
-            <button class="download-button" on:click={() => downloadMap(activeMapIndex)}>
-              <span class="icon">⬇️</span> Download
-            </button>
-          </div>
-          
-          <div class="map-image">
-            <!-- This would be replaced by your actual map component -->
-            <img src={maps[activeMapIndex].tileUrl || "/placeholder.svg"} alt={maps[activeMapIndex].name} />
-          </div>
+      <div class="date-info">
+        <div class="date-group">
+          <span class="date-label">Pre-fire:</span>
+          <span class="date-value">{formattedPreFire}</span>
+        </div>
+        <div class="date-group">
+          <span class="date-label">Post-fire:</span>
+          <span class="date-value">{formattedPostFire}</span>
+        </div>
+      </div>
+    </div>
+    
+    {#if error}
+      <div class="error-message">
+        <p>API error: {error}</p>
+        {#if debugInfo}
+          <details>
+            <summary>Debug Information</summary>
+            <pre>{debugInfo}</pre>
+          </details>
         {/if}
       </div>
-    </div>
-    
-    {#if maps[activeMapIndex]?.name === 'Severity' && !stats}
-      <div class="stats-prompt">
-        <button class="stats-button" on:click={calculateStats}>
-          <span class="icon">📊</span> Calculate Burned Area Statistics
-        </button>
-      </div>
     {/if}
     
-    {#if stats}
-      <div class="stats-container">
-        <h3>Burned Area Statistics</h3>
-        <p class="total-area">Total area: {stats.totalArea.toFixed(1)} hectares</p>
-        
-        <div class="stats-chart">
-          <div class="chart-bars">
-            {#each severityClasses as cls}
-              {#if stats.classTotals[cls.value]}
-                <div class="chart-bar-container">
-                  <div 
-                    class="chart-bar" 
-                    style="height: {(stats.classTotals[cls.value] / stats.maxClassTotal) * 100}%; background-color: {cls.color};"
-                  ></div>
-                  <span class="bar-value">{stats.classTotals[cls.value].toFixed(1)} ha</span>
-                  <span class="bar-label">{cls.label}</span>
-                </div>
-              {/if}
-            {/each}
-          </div>
-        </div>
-        
-        <div class="stats-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Severity Class</th>
-                <th>Area (ha)</th>
-                <th>Percentage</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each severityClasses as cls}
-                {#if stats.classTotals[cls.value]}
-                  <tr>
-                    <td>
-                      <span class="color-box" style="background-color: {cls.color};"></span>
-                      {cls.label}
-                    </td>
-                    <td>{stats.classTotals[cls.value].toFixed(1)}</td>
-                    <td>{((stats.classTotals[cls.value] / stats.totalArea) * 100).toFixed(1)}%</td>
-                  </tr>
-                {/if}
-              {/each}
-            </tbody>
-          </table>
-        </div>
+    {#if isLoading}
+      <div class="loading-indicator">
+        <div class="spinner"></div>
+        <p>Generating severity maps...</p>
+        <p class="loading-info">This may take a few minutes depending on the size of the area and selected date range.</p>
       </div>
     {/if}
-  {:else}
-    <div class="empty-state">
-      <p>Select a region and date ranges to generate burn severity maps</p>
-      {#if geometry && satellite && preStart && preEnd && postStart && postEnd}
-        <button class="generate-button" on:click={generateMaps}>
-          <span class="icon">🔥</span> Generate Severity Maps
-        </button>
-      {/if}
-    </div>
   {/if}
 </div>
 
 <style>
   .severity-mapper {
     width: 100%;
-    height: 100%;
+    padding: 1rem;
+  }
+  
+  .info-message, .error-message {
+    padding: 1rem;
+    border-radius: var(--border-radius);
+    margin-bottom: 1rem;
+  }
+  
+  .info-message {
+    background-color: rgba(0, 0, 0, 0.05);
+    border: 1px solid var(--border-color);
+  }
+  
+  .error-message {
+    background-color: rgba(250, 82, 82, 0.1);
+    border: 1px solid #fa5252;
+    color: #fa5252;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    margin: 1rem 0;
+  }
+  
+  .error-message details {
+    margin-top: 0.5rem;
+  }
+  
+  .error-message pre {
+    background-color: rgba(0, 0, 0, 0.05);
+    padding: 0.5rem;
+    border-radius: 0.25rem;
+    overflow-x: auto;
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+  }
+  
+  .severity-controls {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  .generate-button {
+    background: #4263EB;
+    color: white;
+    border: none;
+    border-radius: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 5px rgba(66, 99, 235, 0.2);
+    width: fit-content;
+  }
+  
+  .generate-button:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(66, 99, 235, 0.3);
+  }
+  
+  .generate-button:disabled {
+    background: #adb5bd;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+  
+  .date-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-top: 1rem;
+  }
+  
+  .date-group {
+    display: flex;
+    gap: 0.5rem;
+  }
+  
+  .date-label {
+    font-weight: 600;
+    min-width: 70px;
   }
   
   .loading-indicator {
@@ -253,8 +258,8 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 40px;
-    gap: 16px;
+    padding: 2rem;
+    text-align: center;
   }
   
   .spinner {
@@ -262,267 +267,32 @@
     height: 40px;
     border: 4px solid rgba(0, 0, 0, 0.1);
     border-radius: 50%;
-    border-top-color: var(--primary);
+    border-top-color: #4263EB;
     animation: spin 1s ease-in-out infinite;
+    margin-bottom: 1rem;
+  }
+  
+  .loading-info {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-top: 0.5rem;
   }
   
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
   
-  .error-message {
-    background-color: rgba(250, 82, 82, 0.1);
-    border: 1px solid var(--danger);
-    border-radius: var(--border-radius);
-    padding: 16px;
-    text-align: center;
-  }
-  
-  .error-message p {
-    color: var(--danger);
-    margin-bottom: 12px;
-  }
-  
-  .error-message button {
-    background-color: var(--danger);
-    color: white;
-    border: none;
-    border-radius: var(--border-radius-sm);
-    padding: 8px 16px;
-    cursor: pointer;
-    font-weight: 500;
-  }
-  
-  .maps-container {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
-    overflow: hidden;
-  }
-  
-  .map-tabs {
-    display: flex;
-    background-color: var(--bg-secondary);
-    border-bottom: 1px solid var(--border-color);
-  }
-  
-  .tab-button {
-    padding: 12px 16px;
-    background: none;
-    border: none;
-    border-bottom: 3px solid transparent;
-    cursor: pointer;
-    font-weight: 500;
-    color: var(--text-secondary);
-    transition: var(--transition);
-  }
-  
-  .tab-button:hover {
-    background-color: rgba(0, 0, 0, 0.05);
-    color: var(--text-primary);
-  }
-  
-  .tab-button.active {
-    border-bottom-color: var(--primary);
-    color: var(--primary);
-  }
-  
-  .map-display {
-    padding: 16px;
-  }
-  
-  .map-info {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 12px;
-  }
-  
-  .map-info h3 {
-    font-size: 1.1rem;
-    font-weight: 600;
-    margin: 0;
-  }
-  
-  .download-button {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 12px;
-    background-color: var(--accent);
-    color: white;
-    border: none;
-    border-radius: var(--border-radius-sm);
-    cursor: pointer;
-    font-weight: 500;
-    transition: var(--transition);
-  }
-  
-  .download-button:hover {
-    background-color: var(--accent-dark);
-  }
-  
-  .map-image {
-    width: 100%;
-    height: 400px;
-    background-color: #f0f0f0;
-    border-radius: var(--border-radius-sm);
-    overflow: hidden;
-  }
-  
-  .map-image img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 40px;
-    gap: 16px;
-    text-align: center;
-    color: var(--text-secondary);
-  }
-  
-  .generate-button {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 20px;
-    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
-    color: white;
-    border: none;
-    border-radius: var(--border-radius-sm);
-    cursor: pointer;
-    font-weight: 500;
-    transition: var(--transition);
-    box-shadow: 0 2px 5px rgba(230, 44, 0, 0.2);
-  }
-  
-  .generate-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 10px rgba(230, 44, 0, 0.3);
-  }
-  
-  .stats-prompt {
-    display: flex;
-    justify-content: center;
-    margin-top: 16px;
-  }
-  
-  .stats-button {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 16px;
-    background-color: var(--success);
-    color: white;
-    border: none;
-    border-radius: var(--border-radius-sm);
-    cursor: pointer;
-    font-weight: 500;
-    transition: var(--transition);
-  }
-  
-  .stats-button:hover {
-    background-color: #1ba785;
-  }
-  
-  .stats-container {
-    margin-top: 24px;
-    padding: 20px;
-    background-color: var(--bg-card);
-    border-radius: var(--border-radius);
-    box-shadow: var(--shadow);
-  }
-  
-  .stats-container h3 {
-    font-size: 1.2rem;
-    font-weight: 600;
-    margin-bottom: 12px;
-  }
-  
-  .total-area {
-    font-size: 1.1rem;
-    font-weight: 500;
-    margin-bottom: 20px;
-  }
-  
-  .stats-chart {
-    margin-bottom: 24px;
-  }
-  
-  .chart-bars {
-    display: flex;
-    height: 200px;
-    gap: 16px;
-    align-items: flex-end;
-    padding: 0 12px;
-  }
-  
-  .chart-bar-container {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-  }
-  
-  .chart-bar {
-    width: 100%;
-    min-height: 4px;
-    border-radius: 4px 4px 0 0;
-    transition: height 0.5s ease;
-  }
-  
-  .bar-value {
-    font-size: 0.85rem;
-    font-weight: 500;
-  }
-  
-  .bar-label {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    text-align: center;
-  }
-  
-  .stats-table {
-    width: 100%;
-    overflow-x: auto;
-  }
-  
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  
-  th, td {
-    padding: 10px;
-    text-align: left;
-    border-bottom: 1px solid var(--border-color);
-  }
-  
-  th {
-    font-weight: 600;
-    color: var(--text-secondary);
-    font-size: 0.9rem;
-  }
-  
-  .color-box {
-    display: inline-block;
-    width: 16px;
-    height: 16px;
-    border-radius: 4px;
-    margin-right: 8px;
-    vertical-align: middle;
-  }
-  
-  .icon {
-    font-size: 1.1rem;
+  @media (min-width: 768px) {
+    .severity-controls {
+      flex-direction: row;
+      align-items: flex-start;
+      justify-content: space-between;
+    }
+    
+    .generate-button {
+      flex-shrink: 0;
+    }
   }
 </style>

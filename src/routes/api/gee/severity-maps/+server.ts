@@ -1,154 +1,95 @@
 import { json } from '@sveltejs/kit';
-import { getEE } from '$lib/utils/gee-utils';
 
+/**
+ * @type {import('@sveltejs/kit').RequestHandler}
+ */
 export async function POST({ request }) {
   try {
-    const ee = await getEE();
-    const {
-      geometry,
-      satellite,
-      preStart,
-      preEnd,
-      postStart,
-      postEnd,
-      applySegmentation = false
-    } = await request.json();
-
-    const geom = ee.Geometry(geometry);
-    const scale = getScaleForSatellite(satellite);
-
-    // Get image collections for pre and post fire periods
-    const col = getImageCollection(ee, satellite, 'NBR')
-      .filterBounds(geom);
+    // Parse the request body
+    const data = await request.json();
     
-    const pre = col.filterDate(preStart, preEnd).median();
-    const post = col.filterDate(postStart, postEnd).median();
-
-    // Calculate burn severity indices
-    const dNBR = pre.subtract(post).rename('dNBR');
-    const RdNBR = dNBR.divide(pre.abs().sqrt()).rename('RdNBR');
-    const RBR = dNBR.divide(pre.add(1.001)).rename('RBR');
-
-    // Classify dNBR into severity classes
-    const classified = dNBR
-      .where(dNBR.lte(0.1), 1)
-      .where(dNBR.gt(0.1).and(dNBR.lte(0.27)), 2)
-      .where(dNBR.gt(0.27).and(dNBR.lte(0.44)), 3)
-      .where(dNBR.gt(0.44).and(dNBR.lte(0.66)), 4)
-      .where(dNBR.gt(0.66), 5)
-      .rename('Severity')
-      .toInt16();
-
-    // Apply segmentation if requested
-    let finalDNBR = dNBR;
-    let finalRdNBR = RdNBR;
-    let finalRBR = RBR;
-    let finalClassified = classified;
-
-    if (applySegmentation) {
-      // Apply median filter to smooth the results
-      const medianKernelSize = 3;
-      const dnbrThreshold = 0.1;
-      const minAreaSize = 100;
-
-      // Calculate delta NBR mask
-      const deltaMask = dNBR
-        .focalMedian({kernelType: 'square', radius: medianKernelSize})
-        .gte(dnbrThreshold);
-      
-      // Analyze connected components
-      const pixelCountImage = deltaMask.eq(1).connectedPixelCount(minAreaSize, true);
-      
-      // Keep only larger connected components
-      const largerClumpsMask = pixelCountImage.gte(minAreaSize);
-      
-      // Apply mask to all layers
-      finalDNBR = dNBR.updateMask(deltaMask.and(largerClumpsMask));
-      finalRdNBR = RdNBR.updateMask(deltaMask.and(largerClumpsMask));
-      finalRBR = RBR.updateMask(deltaMask.and(largerClumpsMask));
-      finalClassified = classified.updateMask(deltaMask.and(largerClumpsMask));
+    // Log the received data for debugging
+    console.log('Received request data:', data);
+    
+    // Validate required fields
+    if (!data.geometry) {
+      return json({ error: 'Missing geometry data' }, { status: 400 });
     }
-
-    // Clip to the geometry
-    finalDNBR = finalDNBR.clip(geom);
-    finalRdNBR = finalRdNBR.clip(geom);
-    finalRBR = finalRBR.clip(geom);
-    finalClassified = finalClassified.clip(geom);
-
-    // Visualization parameters
-    const visParams = {
-      dNBR: { min: 0, max: 0.85, palette: ['b6cdff', 'efcc4b', 'c03838'] },
-      RdNBR: { min: -0.5, max: 1.5, palette: ['b6cdff', 'efcc4b', 'c03838'] },
-      RBR: { min: 0, max: 0.6, palette: ['b6cdff', 'efcc4b', 'c03838'] },
-      Severity: { min: 1, max: 5, palette: ['3385ff', 'ffff4d', 'ff8000', 'b30000', '330000'] }
-    };
-
-    // Generate map URLs
-    const mapPromises = [
-      getTileUrl(ee, finalDNBR, visParams.dNBR, 'dNBR'),
-      getTileUrl(ee, finalRdNBR, visParams.RdNBR, 'RdNBR'),
-      getTileUrl(ee, finalRBR, visParams.RBR, 'RBR'),
-      getTileUrl(ee, finalClassified, visParams.Severity, 'Severity')
-    ];
-
-    const mapResults = await Promise.all(mapPromises);
     
-    return json({ maps: mapResults });
-  } catch (err) {
-    console.error('Error generating severity maps:', err);
-    return json({ error: 'Server error' }, { status: 500 });
-  }
-}
-
-// Helper function to get tile URL for a map layer
-async function getTileUrl(ee, image, visParams, name) {
-  return new Promise((resolve, reject) => {
-    image.visualize(visParams).getMapId((mapid, error) => {
-      if (error) reject(error);
-      else resolve({
-        name,
-        tileUrl: mapid.tile_fetcher.url_format
+    if (!data.satellite) {
+      return json({ error: 'Missing satellite selection' }, { status: 400 });
+    }
+    
+    if (!data.preStart || !data.preEnd || !data.postStart || !data.postEnd) {
+      return json({ error: 'Missing date range parameters' }, { status: 400 });
+    }
+    
+    // Here you would normally call your GEE service
+    // For now, we'll simulate a response
+    
+    // Uncomment this to test the actual GEE service call
+    /*
+    try {
+      // Call the GEE service
+      const geeResponse = await fetch('your-actual-gee-service-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          geometry: data.geometry,
+          satellite: data.satellite,
+          preStart: data.preStart,
+          preEnd: data.preEnd,
+          postStart: data.postStart,
+          postEnd: data.postEnd,
+          applySegmentation: data.applySegmentation
+        })
       });
+      
+      if (!geeResponse.ok) {
+        const errorText = await geeResponse.text();
+        console.error('GEE service error:', errorText);
+        return json({ error: `GEE service error: ${geeResponse.status}`, details: errorText }, { status: 500 });
+      }
+      
+      const geeData = await geeResponse.json();
+      return json(geeData);
+    } catch (geeError) {
+      console.error('Error calling GEE service:', geeError);
+      return json({ error: 'Error calling GEE service', details: geeError.message }, { status: 500 });
+    }
+    */
+    
+    // For testing, return a mock response
+    return json({
+      success: true,
+      maps: [
+        {
+          name: 'Delta NBR',
+          description: 'Normalized Burn Ratio difference',
+          tileUrl: 'https://example.com/tiles/dnbr/{z}/{x}/{y}',
+          previewUrl: '/placeholder.svg?height=200&width=300&text=Delta+NBR'
+        },
+        {
+          name: 'RdNBR',
+          description: 'Relativized Delta NBR',
+          tileUrl: 'https://example.com/tiles/rdnbr/{z}/{x}/{y}',
+          previewUrl: '/placeholder.svg?height=200&width=300&text=RdNBR'
+        },
+        {
+          name: 'Burn Severity Classes',
+          description: 'Classified burn severity',
+          tileUrl: 'https://example.com/tiles/severity/{z}/{x}/{y}',
+          previewUrl: '/placeholder.svg?height=200&width=300&text=Severity+Classes'
+        }
+      ]
     });
-  });
-}
-
-// Helper function to get the appropriate scale for a satellite
-function getScaleForSatellite(sat) {
-  return {
-    'Terra/MODIS': 500,
-    'Landsat-5/TM': 30,
-    'Landsat-7/ETM': 30,
-    'Landsat-8/OLI': 30,
-    'Sentinel-2/MSI': 20
-  }[sat] || 30;
-}
-
-// Helper function to get the appropriate image collection and calculate NBR
-function getImageCollection(ee, satellite, index) {
-  const collections = {
-    'Terra/MODIS': 'MODIS/061/MOD09A1',
-    'Landsat-5/TM': 'LANDSAT/LT05/C02/T1_L2',
-    'Landsat-7/ETM': 'LANDSAT/LE07/C02/T1_L2',
-    'Landsat-8/OLI': 'LANDSAT/LC08/C02/T1_L2',
-    'Sentinel-2/MSI': 'COPERNICUS/S2_SR_HARMONIZED'
-  };
-
-  const bands = {
-    'Terra/MODIS': ['sur_refl_b02', 'sur_refl_b07'],
-    'Landsat-5/TM': ['SR_B4', 'SR_B7'],
-    'Landsat-7/ETM': ['SR_B4', 'SR_B7'],
-    'Landsat-8/OLI': ['SR_B5', 'SR_B7'],
-    'Sentinel-2/MSI': ['B8', 'B12']
-  };
-
-  const [b1, b2] = bands[satellite];
-
-  return ee.ImageCollection(collections[satellite])
-    .map(img => {
-      const image = ee.Image(img);
-      return image.normalizedDifference([b1, b2]).rename('NBR')
-        .copyProperties(image, ['system:time_start']);
-    })
-    .select('NBR');
+    
+  } catch (error) {
+    console.error('Server error:', error);
+    return json({ 
+      error: 'Server error processing request',
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    }, { status: 500 });
+  }
 }

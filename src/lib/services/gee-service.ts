@@ -4,7 +4,7 @@ import ee from '@google/earthengine';
 
 // Types for function parameters
 type TimeSeriesParams = {
-  satellite: string;
+  satellite: string; // Agora pode receber o nome completo (ex: 'Landsat-8/OLI')
   index: 'NDVI' | 'NBR';
   startDate: string;
   endDate: string;
@@ -17,7 +17,7 @@ type TimeSeriesPoint = {
 };
 
 type SeverityParams = {
-  satellite: string;
+  satellite: string; // Agora pode receber o nome completo
   index: 'NDVI' | 'NBR';
   fireDate: string; // ISO format: 'YYYY-MM-DD'
   windowSize: number; // in days
@@ -43,15 +43,18 @@ export async function getTimeSeriesData({
   geometry
 }: TimeSeriesParams): Promise<TimeSeriesPoint[]> {
   const ee = await getEE();
+  
+  // Normalizar o nome do satélite
+  const normalizedSatellite = normalizeSatelliteLabel(satellite);
 
   const geom = ee.FeatureCollection([ee.Feature(ee.Geometry(geometry))]);
 
-  const col = getImageCollection(ee, satellite, index)
+  const col = getImageCollection(ee, normalizedSatellite, index)
     .filterDate(startDate, endDate)
     .filterBounds(geom)
     .sort('system:time_start'); // Ensures chronological order
 
-  const scale = getScaleForSatellite(satellite);
+  const scale = getScaleForSatellite(normalizedSatellite);
 
   const list = ee.List(col.toList(col.size()));
   const images = await evaluate<any[]>(list);
@@ -78,14 +81,26 @@ export async function getTimeSeriesData({
   );
 }
 
+function normalizeSatelliteLabel(label: string): string {
+  return {
+    'Landsat-8/OLI': 'Landsat8',
+    'Landsat-7/ETM': 'Landsat7',
+    'Landsat-5/TM': 'Landsat5',
+    'Sentinel-2/MSI': 'Sentinel2',
+    'Terra/MODIS': 'MODIS'
+  }[label] ?? label;
+}
+
+
 // Chooses image collection and computes index band
 function getImageCollection(ee: any, satellite: string, index: string) {
+  // O satellite já deve estar normalizado antes de chegar aqui
   const collections: Record<string, string> = {
-    MODIS: 'MODIS/061/MOD09A1',
-    Landsat5: 'LANDSAT/LT05/C02/T1_L2',
-    Landsat7: 'LANDSAT/LE07/C02/T1_L2',
-    Landsat8: 'LANDSAT/LC08/C02/T1_L2',
-    Sentinel2: 'COPERNICUS/S2_SR_HARMONIZED'
+    'MODIS': 'MODIS/061/MOD09A1',
+    'Landsat5': 'LANDSAT/LT05/C02/T1_L2',
+    'Landsat7': 'LANDSAT/LE07/C02/T1_L2',
+    'Landsat8': 'LANDSAT/LC08/C02/T1_L2',
+    'Sentinel2': 'COPERNICUS/S2_SR_HARMONIZED'
   };
 
   const defaultBands: Record<string, [string, string]> = {
@@ -126,12 +141,13 @@ function getImageCollection(ee: any, satellite: string, index: string) {
 
 // Returns pixel scale depending on satellite source
 function getScaleForSatellite(sat: string) {
+  // O sat já deve estar normalizado antes de chegar aqui
   return {
-    MODIS: 500,
-    Landsat5: 30,
-    Landsat7: 30,
-    Landsat8: 30,
-    Sentinel2: 20
+    'MODIS': 500,
+    'Landsat5': 30,
+    'Landsat7': 30,
+    'Landsat8': 30,
+    'Sentinel2': 20
   }[sat] ?? 30;
 }
 
@@ -157,6 +173,10 @@ export async function getSeverityTrajectory({
   geometry
 }: SeverityParams): Promise<{ days: number[]; deltas: (number | null)[] }> {
   const ee = await getEE();
+  
+  // Normalizar o nome do satélite
+  const normalizedSatellite = normalizeSatelliteLabel(satellite);
+  
   const geom = ee.Geometry(geometry);
 
   const start = ee.Date(fireDate).advance(-windowSize, 'day');
@@ -168,7 +188,7 @@ export async function getSeverityTrajectory({
     windowSize * 24 * 60 * 60 * 1000
   ).map((millis: any) => ee.Date(millis));
 
-  const imgCol = getImageCollection(ee, satellite, index).filterBounds(geom);
+  const imgCol = getImageCollection(ee, normalizedSatellite, index).filterBounds(geom);
 
   const bands = ee.List.sequence(0, dateSeq.length().subtract(2)).map(i => {
     const ini = ee.Date(dateSeq.get(i));
@@ -180,7 +200,7 @@ export async function getSeverityTrajectory({
       .reduceRegion({
         reducer: ee.Reducer.median(),
         geometry: geom,
-        scale: getScaleForSatellite(satellite),
+        scale: getScaleForSatellite(normalizedSatellite),
         maxPixels: 1e13
       })
       .get(index);
@@ -209,6 +229,7 @@ export async function loadSeverityChart(
   geometry: GeoJSON.Geometry
 ): Promise<{ days: number[]; deltas: (number | null)[] } | null> {
   try {
+    // Não normaliza aqui porque presumimos que a API vai normalizar
     const res = await fetch('/api/gee/severity', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -243,11 +264,15 @@ export async function generateSeverityMaps({
   applySegmentation?: boolean;
 }): Promise<any> {
   const ee = await getEE();
+  
+  // Normalizar o nome do satélite
+  const normalizedSatellite = normalizeSatelliteLabel(satellite);
+  
   const region = ee.Geometry(geometry);
 
-  const col = getImageCollection(ee, satellite, 'NBR').filterBounds(region);
+  const col = getImageCollection(ee, normalizedSatellite, 'NBR').filterBounds(region);
 
-  const scale = getScaleForSatellite(satellite);
+  const scale = getScaleForSatellite(normalizedSatellite);
 
   // PRE e POST composites
   const pre = col.filterDate(preStart, preEnd).median();

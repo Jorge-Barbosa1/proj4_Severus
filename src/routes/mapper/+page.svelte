@@ -3,9 +3,9 @@
   import { browser } from '$app/environment';
   import Map from '$lib/components/map/Map.svelte';
   import SeverityMapper from '$lib/components/map/SeverityMapper.svelte';  
-  
+
   let mapComponent: Map;
-  
+
   let selectedDataset = '';
   let selectedYear = '';
   let selectedSatellite = '';
@@ -20,14 +20,16 @@
   let isDarkMode = false;
   let sidebarOpen = true;
   let showAdvancedOptions = false;
-  
+  let showSeverityMap = false;
+  let generatedMaps = [];
+
   type BurnedLayer = { id: string; label: string; year: string; visible: boolean };
   let burnedLayers: BurnedLayer[] = [];
-  
+
   const datasets = ['ICNF burned areas', 'EFFIS burned areas'];
   const icnfYears = Array.from({ length: 22 }, (_, i) => (2000 + i).toString());
   const effisYears = [...icnfYears, '2022', '2023'];
-  
+
   const satelliteLabels = {
     MODIS: 'Terra/MODIS',
     Landsat5: 'Landsat-5/TM',
@@ -35,18 +37,18 @@
     Landsat8: 'Landsat-8/OLI',
     Sentinel2: 'Sentinel-2/MSI'
   };
-  
+
   const satellites = Object.values(satelliteLabels);
   const indices = ['NBR', 'NDVI'];
   $: years = selectedDataset === 'ICNF burned areas' ? icnfYears : effisYears;
-  
+
   onMount(() => {
     if (!browser) return;
-    
+
     document.addEventListener('geometryDrawn', (e: any) => {
       selectedGeometry = e.detail;
     });
-    
+
     document.addEventListener('mapClicked', async (e: any) => {
       const { lat, lon } = e.detail;
       if (!selectedDataset || !selectedYear) return;
@@ -62,38 +64,35 @@
             year: parseInt(selectedYear)
           })
         });
-        
+
         const feature = await res.json();
         selectedGeometry = feature.geometry;
-        
-        // Set pre and post fire dates based on the fire date
+
         const fireDate = feature.properties.fire_date || feature.properties.data_inici || '';
         if (fireDate) {
           const fireDateObj = new Date(fireDate);
-          
-          // Pre-fire: 30 days before the fire
+
           const preFireStartObj = new Date(fireDateObj);
           preFireStartObj.setDate(preFireStartObj.getDate() - 30);
           preFireStart = preFireStartObj.toISOString().split('T')[0];
-          
-          // Pre-fire end: 1 day before the fire
+
           const preFireEndObj = new Date(fireDateObj);
           preFireEndObj.setDate(preFireEndObj.getDate() - 1);
           preFireEnd = preFireEndObj.toISOString().split('T')[0];
-          
-          // Post-fire start: fire date
+
           postFireStart = fireDate.split('T')[0];
-          
-          // Post-fire end: 30 days after the fire
+
           const postFireEndObj = new Date(fireDateObj);
           postFireEndObj.setDate(postFireEndObj.getDate() + 30);
           postFireEnd = postFireEndObj.toISOString().split('T')[0];
         }
-        
-        mapComponent?.addBurnedAreaLayer('selected-area', {
-          type: 'FeatureCollection',
-          features: [feature]
-        }, { color: 'yellow', fillOpacity: 0.7 });
+
+        if (mapComponent) {
+          mapComponent.addBurnedAreaLayer('selected-area', {
+            type: 'FeatureCollection',
+            features: [feature]
+          }, { color: 'yellow', fillOpacity: 0.7 });
+        }
       } catch (err) {
         console.error(err);
       } finally {
@@ -101,7 +100,7 @@
       }
     });
   });
-  
+
   async function addLayerToMap() {
     if (!selectedDataset || !selectedYear) return;
     isLoading = true;
@@ -114,10 +113,14 @@
       });
       const geojson = await res.json();
       const id = `${selectedDataset}-${selectedYear}`;
-      mapComponent?.addBurnedAreaLayer(id, geojson, {
-        color: dsType === 'ICNF' ? 'red' : 'black',
-        fillOpacity: 0.5
-      });
+      
+      if (mapComponent) {
+        mapComponent.addBurnedAreaLayer(id, geojson, {
+          color: dsType === 'ICNF' ? 'red' : 'black',
+          fillOpacity: 0.5
+        });
+      }
+      
       if (!burnedLayers.find(l => l.id === id)) {
         burnedLayers = [...burnedLayers, { id, label: selectedDataset, year: selectedYear, visible: true }];
       }
@@ -127,40 +130,51 @@
       isLoading = false;
     }
   }
-  
+
   function toggleLayerVisibility(layer: BurnedLayer) {
     layer.visible = !layer.visible;
-    if (layer.visible) addLayerToMap();
-    else mapComponent?.removeBurnedAreaLayer(layer.id);
+    if (layer.visible && mapComponent) {
+      addLayerToMap();
+    } else if (mapComponent) {
+      mapComponent.removeBurnedAreaLayer(layer.id);
+    }
   }
-  
+
   function handleMapsGenerated(event: CustomEvent) {
     const { maps } = event.detail;
-    // You can add the maps to your map component here
-    // For example, you might want to add them as overlay layers
-    if (maps && maps.length > 0) {
-      maps.forEach((map: any, index: number) => {
-        mapComponent?.addTileLayer(`severity-${map.name}`, map.tileUrl, {
-          opacity: 0.7,
-          zIndex: 10 + index
-        });
+    generatedMaps = maps;
+    showSeverityMap = true;
+    
+    if (maps && maps.length > 0 && mapComponent) {
+      maps.forEach((map, index) => {
+        if (map.tileUrl) {
+          try {
+            mapComponent.addTileLayer(`severity-${map.name}`, map.tileUrl, {
+              opacity: 0.7,
+              zIndex: 10 + index
+            });
+          } catch (err) {
+            console.error(`Error adding tile layer for ${map.name}:`, err);
+          }
+        }
       });
     }
   }
-  
+
   function toggleDarkMode() {
     isDarkMode = !isDarkMode;
     document.body.classList.toggle('dark-mode');
   }
-  
+
   function toggleSidebar() {
     sidebarOpen = !sidebarOpen;
   }
-  
+
   function toggleAdvancedOptions() {
     showAdvancedOptions = !showAdvancedOptions;
   }
 </script>
+
 
 <div class="app-container {isDarkMode ? 'dark-theme' : ''} {sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}">
   <header class="app-header">
@@ -370,6 +384,23 @@
             applySegmentation={applySegmentation}
             on:mapsGenerated={handleMapsGenerated}
           />
+          
+          {#if showSeverityMap && generatedMaps.length > 0}
+            <div class="generated-maps">
+              <h3>Generated Severity Maps</h3>
+              <div class="maps-grid">
+                {#each generatedMaps as map}
+                  <div class="map-item">
+                    <h4>{map.name}</h4>
+                    <div class="map-preview">
+                      <!-- Use a fallback image instead of placeholder.svg -->
+                      <img src={map.previewUrl || 'https://via.placeholder.com/300x200?text=' + encodeURIComponent(map.name)} alt={map.name} />
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
         </div>
       </div>
     </section>
@@ -462,7 +493,7 @@
 
   /* Header */
   .app-header {
-    background: linear-gradient(120deg, var(--primary), var(--primary-dark));
+    background: linear-gradient(90deg, #FF8C00, #4CAF50);
     color: white;
     height: 64px;
     display: flex;
@@ -474,7 +505,6 @@
     z-index: 1000;
     box-shadow: var(--shadow);
   }
-
   .logo {
     display: flex;
     align-items: center;
@@ -482,13 +512,13 @@
     font-weight: 700;
     font-size: 1.5rem;
   }
-
-  .logo-flame {
-    font-size: 1.75rem;
+  .logo-svg {
+    height: 32px;
   }
-
   .logo-text {
     letter-spacing: 0.5px;
+    font-family: 'Montserrat', sans-serif;
+    font-weight: 700;
   }
 
   .toggle-sidebar-btn {
@@ -1042,6 +1072,50 @@
 
   .tooltip-icon {
     font-size: 1rem;
+  }
+
+  /* Generated Maps */
+  .generated-maps {
+    margin-top: 2rem;
+  }
+
+  .maps-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1rem;
+  }
+
+  .map-item {
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    transition: var(--transition);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .map-item:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow);
+  }
+
+  .map-item h4 {
+    padding: 0.75rem;
+    margin: 0;
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .map-preview {
+    width: 100%;
+    height: 200px;
+    overflow: hidden;
+  }
+
+  .map-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 
   /* Loading Overlay */
