@@ -2,10 +2,9 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import Map from '$lib/components/map/Map.svelte';
-  import SeverityMapper from '$lib/components/map/SeverityMapper.svelte';  
-
+  import SeverityMapper from '$lib/components/map/SeverityMapper.svelte';
+  
   let mapComponent: Map;
-
   let selectedDataset = '';
   let selectedYear = '';
   let selectedSatellite = '';
@@ -22,6 +21,7 @@
   let showAdvancedOptions = false;
   let showSeverityMap = false;
   let generatedMaps = [];
+  let mapComponentDebug = null;
 
   type BurnedLayer = { id: string; label: string; year: string; visible: boolean };
   let burnedLayers: BurnedLayer[] = [];
@@ -29,7 +29,6 @@
   const datasets = ['ICNF burned areas', 'EFFIS burned areas'];
   const icnfYears = Array.from({ length: 22 }, (_, i) => (2000 + i).toString());
   const effisYears = [...icnfYears, '2022', '2023'];
-
   const satelliteLabels = {
     MODIS: 'Terra/MODIS',
     Landsat5: 'Landsat-5/TM',
@@ -37,9 +36,9 @@
     Landsat8: 'Landsat-8/OLI',
     Sentinel2: 'Sentinel-2/MSI'
   };
-
   const satellites = Object.values(satelliteLabels);
   const indices = ['NBR', 'NDVI'];
+
   $: years = selectedDataset === 'ICNF burned areas' ? icnfYears : effisYears;
 
   onMount(() => {
@@ -52,9 +51,10 @@
     document.addEventListener('mapClicked', async (e: any) => {
       const { lat, lon } = e.detail;
       if (!selectedDataset || !selectedYear) return;
+
       try {
         isLoading = true;
-        const res = await fetch('/api/gee/mapper', {
+        const res = await fetch('/api/gee/severity-maps', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -71,7 +71,6 @@
         const fireDate = feature.properties.fire_date || feature.properties.data_inici || '';
         if (fireDate) {
           const fireDateObj = new Date(fireDate);
-
           const preFireStartObj = new Date(fireDateObj);
           preFireStartObj.setDate(preFireStartObj.getDate() - 30);
           preFireStart = preFireStartObj.toISOString().split('T')[0];
@@ -81,17 +80,20 @@
           preFireEnd = preFireEndObj.toISOString().split('T')[0];
 
           postFireStart = fireDate.split('T')[0];
-
           const postFireEndObj = new Date(fireDateObj);
           postFireEndObj.setDate(postFireEndObj.getDate() + 30);
           postFireEnd = postFireEndObj.toISOString().split('T')[0];
         }
 
         if (mapComponent) {
-          mapComponent.addBurnedAreaLayer('selected-area', {
-            type: 'FeatureCollection',
-            features: [feature]
-          }, { color: 'yellow', fillOpacity: 0.7 });
+          try {
+            mapComponent.addBurnedAreaLayer('selected-area', {
+              type: 'FeatureCollection',
+              features: [feature]
+            }, { color: 'yellow', fillOpacity: 0.7 });
+          } catch (err) {
+            console.error('Error adding burned area layer:', err);
+          }
         }
       } catch (err) {
         console.error(err);
@@ -99,10 +101,23 @@
         isLoading = false;
       }
     });
+
+    // Escutar evento customizado para adicionar camadas de tile
+    document.addEventListener('addTileLayer', (e: any) => {
+      const { id, url, options } = e.detail;
+      if (mapComponent && typeof mapComponent.addTileLayer === 'function') {
+        try {
+          mapComponent.addTileLayer(id, url, options);
+        } catch (err) {
+          console.error('Erro ao adicionar tile layer via evento:', err);
+        }
+      }
+    });
   });
 
   async function addLayerToMap() {
     if (!selectedDataset || !selectedYear) return;
+
     isLoading = true;
     try {
       const dsType = selectedDataset === 'ICNF burned areas' ? 'ICNF' : 'EFFIS';
@@ -111,14 +126,19 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ dataset: dsType, year: parseInt(selectedYear) })
       });
+
       const geojson = await res.json();
       const id = `${selectedDataset}-${selectedYear}`;
       
       if (mapComponent) {
-        mapComponent.addBurnedAreaLayer(id, geojson, {
-          color: dsType === 'ICNF' ? 'red' : 'black',
-          fillOpacity: 0.5
-        });
+        try {
+          mapComponent.addBurnedAreaLayer(id, geojson, {
+            color: dsType === 'ICNF' ? 'red' : 'black',
+            fillOpacity: 0.5
+          });
+        } catch (err) {
+          console.error('Error adding burned area layer:', err);
+        }
       }
       
       if (!burnedLayers.find(l => l.id === id)) {
@@ -136,7 +156,11 @@
     if (layer.visible && mapComponent) {
       addLayerToMap();
     } else if (mapComponent) {
-      mapComponent.removeBurnedAreaLayer(layer.id);
+      try {
+        mapComponent.removeBurnedAreaLayer(layer.id);
+      } catch (err) {
+        console.error('Error removing layer:', err);
+      }
     }
   }
 
@@ -145,19 +169,44 @@
     generatedMaps = maps;
     showSeverityMap = true;
     
-    if (maps && maps.length > 0 && mapComponent) {
-      maps.forEach((map, index) => {
-        if (map.tileUrl) {
-          try {
-            mapComponent.addTileLayer(`severity-${map.name}`, map.tileUrl, {
-              opacity: 0.7,
-              zIndex: 10 + index
+    // CORREÇÃO: Verificar se o mapComponent tem o método correto
+    if (mapComponent && maps.length > 0) {
+      const tileUrl = maps[0].tileUrl;
+      
+      try {
+        // Tentar diferentes métodos possíveis
+        if (typeof mapComponent.addTileLayer === 'function') {
+          mapComponent.addTileLayer('severity-layer', tileUrl, {
+            opacity: 0.75,
+            attribution: 'Burn Severity (GEE)'
+          });
+        } else if (typeof mapComponent.addLayer === 'function') {
+          // Alternativa se o método for addLayer
+          mapComponent.addLayer('severity-layer', tileUrl, {
+            opacity: 0.75,
+            attribution: 'Burn Severity (GEE)'
+          });
+        } else if (mapComponent.getMap && typeof mapComponent.getMap === 'function') {
+          // Se tiver acesso direto ao mapa Leaflet
+          const leafletMap = mapComponent.getMap();
+          if (leafletMap && window.L) {
+            const tileLayer = window.L.tileLayer(tileUrl, {
+              opacity: 0.75,
+              attribution: 'Burn Severity (GEE)'
             });
-          } catch (err) {
-            console.error(`Error adding tile layer for ${map.name}:`, err);
+            tileLayer.addTo(leafletMap);
           }
+        } else {
+          console.warn('Métodos de adicionar tile layer não encontrados no componente Map');
+          console.log('Métodos disponíveis:', Object.getOwnPropertyNames(mapComponent));
         }
-      });
+      } catch (err) {
+        console.error('Erro ao adicionar camada de severidade:', err);
+        console.log('Tipo do mapComponent:', typeof mapComponent);
+        console.log('Métodos disponíveis:', mapComponent ? Object.getOwnPropertyNames(mapComponent) : 'mapComponent is null');
+      }
+    } else {
+      console.warn('mapComponent não disponível ou maps vazio');
     }
   }
 
@@ -385,6 +434,12 @@
             on:mapsGenerated={handleMapsGenerated}
           />
           
+          {#if mapComponentDebug}
+            <div class="debug-info">
+              <p>Map component type: {mapComponentDebug}</p>
+            </div>
+          {/if}
+          
           {#if showSeverityMap && generatedMaps.length > 0}
             <div class="generated-maps">
               <h3>Generated Severity Maps</h3>
@@ -393,8 +448,10 @@
                   <div class="map-item">
                     <h4>{map.name}</h4>
                     <div class="map-preview">
-                      <!-- Use a fallback image instead of placeholder.svg -->
                       <img src={map.previewUrl || 'https://via.placeholder.com/300x200?text=' + encodeURIComponent(map.name)} alt={map.name} />
+                    </div>
+                    <div class="map-info">
+                      <p>{map.description || 'Burn severity map'}</p>
                     </div>
                   </div>
                 {/each}
@@ -1116,6 +1173,21 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  .map-info {
+    padding: 0.75rem;
+  }
+
+  /* Debug Info */
+  .debug-info {
+    margin-top: 1rem;
+    padding: 1rem;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 0.25rem;
+    font-family: monospace;
+    font-size: 0.9rem;
   }
 
   /* Loading Overlay */

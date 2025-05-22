@@ -8,6 +8,7 @@
   let drawControl;
   let geoJsonLayers = {};
   let imageLayer = null;
+  let tileLayers = {};
 
   const dispatcher = createEventDispatcher();
 
@@ -129,6 +130,18 @@
     if (!map || !drawnItems) return;
     drawnItems.clearLayers();
   }
+
+  export function addTileLayer(id: string, url: string, options = {}) {
+    if (!map) return;
+
+    // Adiciona a tile layer ao Leaflet
+    const tileLayer = L.tileLayer(url, options);
+    tileLayer.addTo(map);
+
+    // Guarda a referência para poder remover depois, se necessário
+    tileLayers[id] = tileLayer;
+  }
+
 </script>
 
 <div id="map" style="width: 100%; height: 100%; min-height: 400px;"></div>

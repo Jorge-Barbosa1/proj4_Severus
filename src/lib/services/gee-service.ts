@@ -302,3 +302,28 @@ export async function generateSeverityMaps({
 
   return result;
 }
+
+export async function getSeverityMap(lat: number, lon: number, dataset: string, year: number) {
+  try {
+    const response = await fetch(`/api/gee/severity-maps?lat=${lat}&lon=${lon}&dataset=${dataset}&year=${year}`);
+
+    if (!response.ok) {
+      throw new Error('Erro ao buscar mapa de severidade');
+    }
+
+    const data = await response.json();
+
+    return {
+      tileUrl: data.tileUrl,
+      bounds: {
+        south: data.bounds.south,
+        west: data.bounds.west,
+        north: data.bounds.north,
+        east: data.bounds.east
+      }
+    };
+  } catch (error) {
+    console.error('Erro na função getSeverityMap:', error);
+    throw error;
+  }
+}
