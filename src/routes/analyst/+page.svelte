@@ -3,21 +3,24 @@
   import { browser } from '$app/environment';
   import Map from '$lib/components/map/Map.svelte';
   import FireAnalyst from '$lib/components/analyst/FireAnalyst.svelte';
+
   let mapComponent: Map;
-  let selectedDataset = '';
-  let selectedYear = '';
-  let selectedSatellite = '';
-  let selectedIndex = '';
-  let startDate = new Date().toISOString().split('T')[0];
-  let endDate = new Date().toISOString().split('T')[0];
-  let fireDate = '';
-  let analysisRangeDays = 30;
-  let selectedGeometry: any = null;
-  let isLoading = false;
-  let isDarkMode = false;
-  let sidebarOpen = true;
+  let selectedDataset = $state('');
+  let selectedYear = $state('');
+  let selectedSatellite = $state('');
+  let selectedIndex = $state('');
+  let startDate = $state(new Date().toISOString().split('T')[0]);
+  let endDate = $state(new Date().toISOString().split('T')[0]);
+  let fireDate = $state('');
+  let analysisRangeDays = $state(30);
+  let selectedGeometry = $state(null);
+  let isLoading = $state(false);
+  let isDarkMode = $state(false);
+  let sidebarOpen = $state(true);
+
   type BurnedLayer = { id: string; label: string; year: string; visible: boolean };
-  let burnedLayers: BurnedLayer[] = [];
+  let burnedLayers = $state([]);
+  
   const datasets = ['ICNF burned areas', 'EFFIS burned areas'];
   const icnfYears = Array.from({ length: 22 }, (_, i) => (2000 + i).toString());
   const effisYears = [...icnfYears, '2022', '2023'];
@@ -30,7 +33,10 @@
   };
   const satellites = Object.values(satelliteLabels);
   const indices = ['NBR', 'NDVI'];
-  $: years = selectedDataset === 'ICNF burned areas' ? icnfYears : effisYears;
+  
+  let years = $derived(selectedDataset === 'ICNF burned areas' ? icnfYears : effisYears);
+  
+  
   onMount(() => {
     if (!browser) return;
     document.addEventListener('geometryDrawn', (e: any) => {
@@ -38,6 +44,7 @@
     });
     document.addEventListener('mapClicked', async (e: any) => {
       const { lat, lon } = e.detail;
+
       if (!selectedDataset || !selectedYear) return;
       try {
         isLoading = true;
@@ -125,17 +132,16 @@
 
 <div class="app-container {isDarkMode ? 'dark-theme' : ''} {sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}">
   <header class="app-header">
-    <div class="toggle-sidebar-btn" on:click={toggleSidebar}>
+    <div class="toggle-sidebar-btn" onclick={toggleSidebar}>
       <span></span><span></span><span></span>
     </div>
     
     <div class="logo">
-      <span class="logo-flame">🔥</span>
-      <span class="logo-text">SeverusPT</span>
+      <img src="/severus.png" alt="SeverusPT Logo" class="logo-image" />
     </div>
     
     <div class="header-actions">
-      <button class="theme-toggle" on:click={toggleDarkMode}>
+      <button class="theme-toggle" onclick={toggleDarkMode}>
         {#if isDarkMode}
           <span class="icon">☀️</span>
         {:else}
@@ -144,11 +150,6 @@
       </button>
     </div>
   </header>
-
-  <div class="title-bar">
-    <h1>Análise de Severidade de Incêndios</h1>
-    <p class="project-info">FCT: PCIF/RPG/0170/2019</p>
-  </div>
   
   <main class="main-content">
     <aside class="sidebar">
@@ -190,7 +191,7 @@
               </div>
             </div>
             
-            <button class="action-button" on:click={addLayerToMap} disabled={isLoading || !selectedDataset || !selectedYear}>
+            <button class="action-button" onclick={addLayerToMap} disabled={isLoading || !selectedDataset || !selectedYear}>
               <span class="button-icon">+</span>
               <span class="button-text">Adicionar camada</span>
             </button>
@@ -207,7 +208,7 @@
                             type="checkbox" 
                             id={`layer-${layer.id}`} 
                             bind:checked={layer.visible} 
-                            on:change={() => toggleLayerVisibility(layer)} 
+                            onchange={() => toggleLayerVisibility(layer)} 
                           />
                           <label for={`layer-${layer.id}`}></label>
                         </div>
@@ -269,7 +270,7 @@
               </div>
             </div>
             
-            <button class="action-button" on:click={displayImage} disabled={isLoading || !selectedSatellite || !selectedIndex || !startDate || !endDate}>
+            <button class="action-button" onclick={displayImage} disabled={isLoading || !selectedSatellite || !selectedIndex || !startDate || !endDate}>
               <span class="button-icon">🖼️</span>
               <span class="button-text">Exibir imagem</span>
             </button>
@@ -320,7 +321,7 @@
     <section class="content-area">
       <div class="card map-card">
         <div class="card-header">
-          <h2>Mapa Interativo</h2>
+          <h2>Mapa</h2>
           <div class="card-actions">
             <span class="map-tip tooltip">
               <span class="tooltip-icon">ℹ️</span>
@@ -428,7 +429,6 @@
     line-height: 1.5;
     color: var(--text-primary);
     background-color: var(--bg-primary);
-    margin: 0;
     transition: background-color 0.3s ease;
   }
 
@@ -444,7 +444,7 @@
 
   /* Header */
   .app-header {
-    background: linear-gradient(120deg, var(--primary), var(--primary-dark));
+    background: linear-gradient(90deg, #FF8C00, #4CAF50);
     color: white;
     height: 64px;
     display: flex;
@@ -460,17 +460,21 @@
   .logo {
     display: flex;
     align-items: center;
-    gap: 12px;
-    font-weight: 700;
-    font-size: 1.5rem;
+    justify-content: center;
+    height: 100%;
   }
 
-  .logo-flame {
-    font-size: 1.75rem;
+  .logo-image {
+    height: 40px;
+    width: auto;
+    max-width: 150px;
+    object-fit: contain;
+    filter: brightness(0) invert(1);
+    transition: var(--transition);
   }
 
-  .logo-text {
-    letter-spacing: 0.5px;
+  .logo-image:hover {
+    transform: scale(1.05);
   }
 
   .toggle-sidebar-btn {
@@ -1070,4 +1074,5 @@
       stroke-dashoffset: 100;
     }
   }
+
 </style>

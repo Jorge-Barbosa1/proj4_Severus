@@ -232,8 +232,7 @@
     </div>
     
     <div class="logo">
-      <span class="logo-flame">🔥</span>
-      <span class="logo-text">SeverusPT</span>
+      <img src="/severus.png" alt="SeverusPT Logo" class="logo-image" />
     </div>
     
     <div class="header-actions">
@@ -247,11 +246,6 @@
     </div>
   </header>
 
-  <div class="title-bar">
-    <h1>Mapeamento de Severidade de Incêndios</h1>
-    <p class="project-info">FCT: PCIF/RPG/0170/2019</p>
-  </div>
-  
   <main class="main-content">
     <aside class="sidebar">
       <div class="sidebar-header">
@@ -400,7 +394,7 @@
     <section class="content-area">
       <div class="card map-card">
         <div class="card-header">
-          <h2>Mapa Interativo</h2>
+          <h2>Mapa</h2>
           <div class="card-actions">
             <span class="map-tip tooltip">
               <span class="tooltip-icon">ℹ️</span>
@@ -562,20 +556,25 @@
     z-index: 1000;
     box-shadow: var(--shadow);
   }
+
   .logo {
     display: flex;
     align-items: center;
-    gap: 12px;
-    font-weight: 700;
-    font-size: 1.5rem;
+    justify-content: center;
+    height: 100%;
   }
-  .logo-svg {
-    height: 32px;
+
+  .logo-image {
+    height: 40px;
+    width: auto;
+    max-width: 150px;
+    object-fit: contain;
+    filter: brightness(0) invert(1);
+    transition: var(--transition);
   }
-  .logo-text {
-    letter-spacing: 0.5px;
-    font-family: 'Montserrat', sans-serif;
-    font-weight: 700;
+
+  .logo-image:hover {
+    transform: scale(1.05);
   }
 
   .toggle-sidebar-btn {

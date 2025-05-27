@@ -1,16 +1,28 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
 
-  export let geometry: any;
-  export let satellite: string;
-  export let preStart: string;
-  export let preEnd: string;
-  export let postStart: string;
-  export let postEnd: string;
-  export let applySegmentation: boolean;
+  interface Props {
+    geometry: any;
+    satellite: string;
+    preStart: string;
+    preEnd: string;
+    postStart: string;
+    postEnd: string;
+    applySegmentation: boolean;
+  }
 
-  let error = '';
-  let generated = false;
+  let {
+    geometry,
+    satellite,
+    preStart,
+    preEnd,
+    postStart,
+    postEnd,
+    applySegmentation
+  }: Props = $props();
+
+  let error = $state('');
+  let generated = $state(false);
 
   const dispatch = createEventDispatcher();
 
@@ -77,9 +89,18 @@
 </script>
 
 <div class="severity-mapper">
-  <button on:click={generateSeverityMap} class="generate-button">
-    Gerar Mapa de Severidade
-  </button>
+  {#if !geometry}
+    <div class="info-message">
+      <p>Selecione uma área queimada no mapa para gerar o mapa de severidade.</p>
+    </div>
+  {:else}
+    <div class="selected-area-message">
+      <p>✓ Área queimada selecionada</p>
+      <button onclick={generateSeverityMap} class="generate-button">
+        Gerar Mapa de Severidade
+      </button>
+    </div>
+  {/if}
 
   {#if error}
     <p class="error">{error}</p>
@@ -114,5 +135,28 @@
   .success {
     color: var(--success);
     margin-top: 0.5rem;
+  }
+
+  .info-message {
+    background-color: rgba(92, 124, 250, 0.1);
+    border-left: 3px solid var(--accent);
+    padding: 12px;
+    border-radius: var(--border-radius-sm);
+    margin-bottom: 16px;
+  }
+
+  .selected-area-message {
+    background-color: rgba(32, 201, 151, 0.1);
+    border-left: 3px solid var(--success);
+    padding: 12px;
+    border-radius: var(--border-radius-sm);
+    margin-bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .selected-area-message p {
+    font-weight: 500;
   }
 </style>

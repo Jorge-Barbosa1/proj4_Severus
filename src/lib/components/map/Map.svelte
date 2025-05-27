@@ -27,19 +27,30 @@
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    // Initialize feature group for drawings
+    // Initialize feature group for drawings and selections
     drawnItems = new L.FeatureGroup();
     map.addLayer(drawnItems);
 
-    // Set up draw control
+    // Set up draw control (now optional and less prominent)
     drawControl = new L.Control.Draw({
+      position: 'topright',
       draw: {
         polyline: false,
         circle: false,
         circlemarker: false,
         marker: false,
-        rectangle: true,
-        polygon: true
+        rectangle: {
+          shapeOptions: {
+            color: '#ff7800',
+            weight: 2
+          }
+        },
+        polygon: {
+          shapeOptions: {
+            color: '#ff7800',
+            weight: 2
+          }
+        }
       },
       edit: {
         featureGroup: drawnItems,
@@ -59,7 +70,7 @@
       document.dispatchEvent(event);
     });
 
-    // Optional: allow click events to select burned areas
+    // Allow click events to select burned areas
     map.on('click', function (e) {
       const { lat, lng } = e.latlng;
       const event = new CustomEvent('mapClicked', { detail: { lat, lon: lng } });
@@ -78,17 +89,72 @@
     const layer = L.geoJSON(geojson, {
       style: {
         color: options.color,
-        fillOpacity: options.fillOpacity
+        fillOpacity: options.fillOpacity,
+        weight: 2
       },
       onEachFeature: (feature, layer) => {
         const props = feature.properties || {};
         const area = props.area_ha || props.area_ht || 'N/A';
         const date = props.fire_date || props.data_inici || 'Data desconhecida';
 
+        // Make each feature selectable
+        layer.on('click', (e) => {
+          // Highlight the selected feature
+          Object.values(geoJsonLayers).forEach(layerGroup => {
+            layerGroup.resetStyle();
+          });
+          
+          layer.setStyle({
+            weight: 4,
+            color: 'yellow',
+            fillOpacity: 0.7
+          });
+          
+          // Dispatch the selection event with the feature geometry
+          const event = new CustomEvent('geometryDrawn', { 
+            detail: feature.geometry 
+          });
+          document.dispatchEvent(event);
+          
+          // Stop propagation to prevent the map click event
+          L.DomEvent.stopPropagation(e);
+        });
+
         layer.bindPopup(`
           <strong>Data:</strong> ${date}<br/>
-          <strong>Área Ardida:</strong> ${area} ha
+          <strong>Área Ardida:</strong> ${area} ha<br/>
+          <button class="select-area-btn">Selecionar esta área</button>
         `);
+        
+        // Add event listener to the popup button
+        layer.on('popupopen', () => {
+          setTimeout(() => {
+            const btn = document.querySelector('.select-area-btn');
+            if (btn) {
+              btn.addEventListener('click', () => {
+                // Highlight the selected feature
+                Object.values(geoJsonLayers).forEach(layerGroup => {
+                  layerGroup.resetStyle();
+                });
+                
+                layer.setStyle({
+                  weight: 4,
+                  color: 'yellow',
+                  fillOpacity: 0.7
+                });
+                
+                // Dispatch the selection event with the feature geometry
+                const event = new CustomEvent('geometryDrawn', { 
+                  detail: feature.geometry 
+                });
+                document.dispatchEvent(event);
+                
+                // Close the popup
+                layer.closePopup();
+              });
+            }
+          }, 10);
+        });
       }
     }).addTo(map);
 
@@ -140,6 +206,43 @@
 
     // Guarda a referência para poder remover depois, se necessário
     tileLayers[id] = tileLayer;
+  }
+
+  export function selectBurnedArea(id: string, featureId: number) {
+    if (!map || !geoJsonLayers[id]) return;
+    
+    const layer = geoJsonLayers[id];
+    let found = false;
+    
+    layer.eachLayer((featureLayer) => {
+      const feature = featureLayer.feature;
+      if (feature.id === featureId || feature.properties.id === featureId) {
+        // Reset all styles first
+        Object.values(geoJsonLayers).forEach(layerGroup => {
+          layerGroup.resetStyle();
+        });
+        
+        // Highlight the selected feature
+        featureLayer.setStyle({
+          weight: 4,
+          color: 'yellow',
+          fillOpacity: 0.7
+        });
+        
+        // Dispatch the selection event
+        const event = new CustomEvent('geometryDrawn', { 
+          detail: feature.geometry 
+        });
+        document.dispatchEvent(event);
+        
+        // Zoom to the feature
+        map.fitBounds(featureLayer.getBounds());
+        
+        found = true;
+      }
+    });
+    
+    return found;
   }
 
 </script>
