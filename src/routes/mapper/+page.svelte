@@ -433,25 +433,6 @@
               <p>Map component type: {mapComponentDebug}</p>
             </div>
           {/if}
-          
-          {#if showSeverityMap && generatedMaps.length > 0}
-            <div class="generated-maps">
-              <h3>Generated Severity Maps</h3>
-              <div class="maps-grid">
-                {#each generatedMaps as map}
-                  <div class="map-item">
-                    <h4>{map.name}</h4>
-                    <div class="map-preview">
-                      <img src={map.previewUrl || 'https://via.placeholder.com/300x200?text=' + encodeURIComponent(map.name)} alt={map.name} />
-                    </div>
-                    <div class="map-info">
-                      <p>{map.description || 'Burn severity map'}</p>
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            </div>
-          {/if}
         </div>
       </div>
     </section>

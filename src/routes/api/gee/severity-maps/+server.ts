@@ -55,21 +55,25 @@ export async function POST({ request }) {
       return img.normalizedDifference(bands).rename('NBR');
     }
 
+    // Filtra as imagens pré Incendio 
     const pre = ee.ImageCollection(collection)
       .filterBounds(geom)
       .filterDate(preStart, preEnd)
       .map(prepareImage)
       .median();
 
+    // Filtra as imagens pós Incendio 
     const post = ee.ImageCollection(collection)
       .filterBounds(geom)
       .filterDate(postStart, postEnd)
       .map(prepareImage)
       .median();
 
+    // Calcula o dNBR (Delta Normalized Burn Ratio)
     const dNBR = pre.subtract(post).rename('dNBR');
 
-    let severity = dNBR
+    // Calcula a severidade do incêndio
+    let severity = dNBR 
       .where(dNBR.lte(0.1), 1)
       .where(dNBR.gt(0.1).and(dNBR.lte(0.27)), 2)
       .where(dNBR.gt(0.27).and(dNBR.lte(0.44)), 3)
