@@ -3,6 +3,7 @@
   import { browser } from '$app/environment';
   import Map from '$lib/components/map/Map.svelte';
   import FireAnalyst from '$lib/components/analyst/FireAnalyst.svelte';
+  import ChatWidget from '$lib/components/ChatBot/ChatWidget.svelte';
 
   let mapComponent: Map;
   let selectedDataset = $state('');
@@ -368,6 +369,7 @@
       </div>
     </div>
   {/if}
+  <ChatWidget />
 </div>
 
 <style>
