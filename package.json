@@ -31,6 +31,7 @@
 		"leaflet": "^1.9.4",
 		"leaflet-draw": "^1.0.4",
 		"maplibre-gl": "^5.4.0",
+		"openai": "^5.0.1",
 		"svelte-apexcharts": "^1.0.2"
 	}
 }

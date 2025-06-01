@@ -3,7 +3,8 @@
   import { browser } from '$app/environment';
   import Map from '$lib/components/map/Map.svelte';
   import SeverityMapper from '$lib/components/map/SeverityMapper.svelte';
-  
+  import ChatWidget from '$lib/components/ChatBot/ChatWidget.svelte';
+
   let mapComponent: Map;
   let selectedDataset = '';
   let selectedYear = '';
@@ -448,6 +449,8 @@
       </div>
     </div>
   {/if}
+
+  <ChatWidget />
 </div>
 
 <style>
