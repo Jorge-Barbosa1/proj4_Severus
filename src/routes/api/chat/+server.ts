@@ -1,64 +1,129 @@
-import type { RequestHandler } from '@sveltejs/kit';
-import OpenAI from 'openai';
-import { DP_API_KEY } from '$env/static/private';
+import type { RequestHandler } from "@sveltejs/kit";
+import { getEmbeddedDocuments } from "$lib/rag/database";
+import { searchSimilarDocuments, type SearchResult } from "$lib/rag/embeddings";
+import { DP_API_KEY } from "$env/static/private";
 
-const openai = new OpenAI({
+// Configuração otimizada para OpenRouter
+const openaiConfig = {
   apiKey: DP_API_KEY,
-  baseURL: 'https://openrouter.ai/api/v1',
+  baseURL: "https://openrouter.ai/api/v1",
   defaultHeaders: {
-    'HTTP-Referer': 'http://localhost:5173/',
-    'X-Title': 'SeverusBot'
+    "HTTP-Referer": "http://localhost:5173/",
+    "X-Title": "SeverusBot"
   }
-});
+};
 
 export const POST: RequestHandler = async ({ request }) => {
   try {
+    // 1. Validação da requisição
     const { messages } = await request.json();
+    const lastUserMessage = messages[messages.length - 1];
 
-    const systemMessage = {
-      role: 'system',
-      content: `
-        Tu és o SeverusBot, um assistente especializado em incêndios florestais em Portugal.
-        Responde sempre em português de forma clara, concisa e formal.
-        Se não souberes a resposta, diz que não sabes.
-      `
-    };
-
-    if (!Array.isArray(messages) || messages.length === 0) {
+    if (!messages?.length || lastUserMessage?.role !== "user") {
       return new Response(
-        JSON.stringify({ error: 'messages deve ser um array não-vazio' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: "Mensagem de usuário inválida" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    const completion = await openai.chat.completions.create({
-      model: 'deepseek/deepseek-r1-0528:free', 
-      messages: [systemMessage, ...messages],
-      temperature: 0.7,
-      max_tokens: 1000
-    });
+    // 2. Busca RAG com tratamento de erros
+    let context = "";
+    try {
+      const embeddedDocs = await getEmbeddedDocuments();
+      const searchResults = await searchSimilarDocuments(
+        lastUserMessage.content,
+        embeddedDocs,
+        3 // topK
+      );
 
-    const reply = completion.choices[0]?.message?.content ?? 'Desculpe, não consegui gerar uma resposta.';
-
-    return new Response(JSON.stringify({ reply }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
-
-  } catch (err) {
-    console.error('Erro no /api/chat:', err);
-    
-    // Log mais detalhado do erro
-    if (err instanceof Error) {
-      console.error('Mensagem do erro:', err.message);
+      context = formatSearchResults(searchResults);
+    } catch (ragError) {
+      console.error("Erro RAG:", ragError);
+      // Continua sem contexto se houver erro
     }
-    
+
+    // 3. Construção do prompt otimizado
+    const systemMessage = buildSystemMessage(context);
+    const chatMessages = [systemMessage, ...messages];
+
+    // 4. Chamada ao modelo com fallback
+    const reply = await generateAIResponse(chatMessages);
+
+    // 5. Resposta formatada
     return new Response(
       JSON.stringify({ 
-        error: 'Falha ao contactar a OpenRouter',
-        details: err instanceof Error ? err.message : 'Erro desconhecido'
+        reply,
+        context: context ? "Contexto encontrado" : "Sem contexto relevante"
       }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+
+  } catch (error) {
+    console.error("Erro no endpoint /api/chat:", error);
+    return new Response(
+      JSON.stringify({ 
+        error: "Erro interno",
+        details: error instanceof Error ? error.message : "Erro desconhecido"
+      }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
 };
+
+// Funções auxiliares ==============================================
+
+function formatSearchResults(results: SearchResult[]): string {
+  if (!results?.length) return "";
+
+  return results
+    .filter(r => r.similarity > 0.65)
+    .slice(0, 3) // Limita a 3 resultados
+    .map(r => `[Fonte: ${r.document.metadata.title}]\n${r.document.content.slice(0, 500)}...`)
+    .join("\n\n---\n\n");
+}
+
+function buildSystemMessage(context: string) {
+  const baseInstructions = `
+  Como especialista em incêndios florestais em Portugal, siga estas regras:
+  1. Responda em português europeu, formal mas acessível
+  2. Seja conciso (1-2 parágrafos)
+  3. Baseie-se apenas no contexto fornecido
+  4. Caso não saiba, responda: "Não possuo dados suficientes sobre isso"
+  `;
+
+  return {
+    role: "system",
+    content: context 
+      ? `${baseInstructions}\n\nCONTEXTO:\n${context.slice(0, 1500)}` 
+      : baseInstructions
+  };
+}
+
+type ChatMessage = { role: string; content: string };
+
+async function generateAIResponse(messages: ChatMessage[]) {
+  try {
+    const completion = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${DP_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost:5173/",
+        "X-Title": "SeverusBot"
+      },
+      body: JSON.stringify({
+        model: "deepseek/deepseek-r1-0528:free",
+        messages,
+        temperature: 0.7,
+        max_tokens: 800
+      })
+    });
+
+    const data = await completion.json();
+    return data.choices[0]?.message?.content || "Não foi possível gerar uma resposta.";
+    
+  } catch (error) {
+    console.error("Erro ao chamar OpenRouter:", error);
+    return "Erro temporário no serviço. Por favor, tente novamente.";
+  }
+}
