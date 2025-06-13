@@ -27,7 +27,7 @@ class FreeEmbeddingsService {
 
   async initialize() {
     if (!this.initialized) {
-      console.log('🚀 Carregando modelo de embeddings...');
+      console.log('Carregando modelo de embeddings...');
       try {
         // Modelo multilíngue otimizado para português
         this.embedder = await pipeline('feature-extraction', 'Xenova/multilingual-e5-small');
@@ -43,7 +43,7 @@ class FreeEmbeddingsService {
   async createEmbedding(text: string): Promise<number[]> {
     await this.initialize();
     
-    // Preprocessar texto para melhor qualidade
+  
     const cleanText = this.preprocessText(text);
     
     const output = await this.embedder(cleanText, { 

@@ -1,5 +1,4 @@
-// lib/rag/database.ts
-import { loadDocumentsFromFolder } from './loadDocs';  // Removida extensão .js
+import { loadDocumentsFromFolder } from './loadDocs'; 
 import { getEmbeddedDocuments as loadEmbeddingsFromFile, type Document } from './embeddings';
 import path from 'path';
 

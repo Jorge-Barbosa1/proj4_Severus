@@ -3,7 +3,7 @@ import { getEmbeddedDocuments } from "$lib/rag/database";
 import { searchSimilarDocuments, type SearchResult } from "$lib/rag/embeddings";
 import { DP_API_KEY } from "$env/static/private";
 
-// Configuração otimizada para OpenRouter
+// Configuração para OpenRouter
 const openaiConfig = {
   apiKey: DP_API_KEY,
   baseURL: "https://openrouter.ai/api/v1",
@@ -26,7 +26,7 @@ export const POST: RequestHandler = async ({ request }) => {
       );
     }
 
-    // 2. Busca RAG com tratamento de erros
+    // 2. Busca RAG 
     let context = "";
     try {
       const embeddedDocs = await getEmbeddedDocuments();
@@ -39,7 +39,6 @@ export const POST: RequestHandler = async ({ request }) => {
       context = formatSearchResults(searchResults);
     } catch (ragError) {
       console.error("Erro RAG:", ragError);
-      // Continua sem contexto se houver erro
     }
 
     // 3. Construção do prompt otimizado
