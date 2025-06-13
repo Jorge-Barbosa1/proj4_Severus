@@ -5,13 +5,12 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
-		"build": "svelte-kit build",
+		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^4.0.0",
-		"@sveltejs/adapter-vercel": "^5.7.2",
 		"@sveltejs/kit": "^2.20.7",
 		"@sveltejs/vite-plugin-svelte": "^5.0.0",
 		"@types/google.maps": "^3.58.1",
