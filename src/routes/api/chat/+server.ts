@@ -8,7 +8,7 @@ const openaiConfig = {
   apiKey: DP_API_KEY,
   baseURL: "https://openrouter.ai/api/v1",
   defaultHeaders: {
-    "HTTP-Referer": "http://localhost:5173/",
+    "HTTP-Referer": "https://proj4-severuspt.onrender.com/",
     "X-Title": "SeverusBot"
   }
 };
@@ -107,7 +107,7 @@ async function generateAIResponse(messages: ChatMessage[]) {
       headers: {
         "Authorization": `Bearer ${DP_API_KEY}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:5173/",
+        "HTTP-Referer": "https://proj4-severuspt.onrender.com/",
         "X-Title": "SeverusBot"
       },
       body: JSON.stringify({
