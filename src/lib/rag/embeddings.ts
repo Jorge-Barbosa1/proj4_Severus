@@ -188,12 +188,12 @@ class FreeEmbeddingsService {
 
   async loadEmbeddingsCache(): Promise<Document[]> {
     try {
-      const data = await fs.readFile(this.CACHE_FILE, 'utf-8');
-      const documents = JSON.parse(data);
+      const res = await fetch('/embeddings_cache.json');
+      const documents = await res.json();
       console.log(`📖 Cache carregado: ${documents.length} documentos`);
       return documents;
     } catch (error) {
-      console.log('ℹ️ Cache não encontrado, será criado novo');
+      console.log('ℹ️ Cache não encontrado ou erro ao carregar:', error);
       return [];
     }
   }
