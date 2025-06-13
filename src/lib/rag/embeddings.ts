@@ -1,7 +1,4 @@
-// lib/rag/embeddings.ts
 import { pipeline } from '@xenova/transformers';
-import fs from 'fs/promises';
-import path from 'path';
 
 type Document = {
   id: string;
@@ -23,13 +20,15 @@ type SearchResult = {
 class FreeEmbeddingsService {
   private embedder: any = null;
   private initialized = false;
-  private readonly CACHE_FILE = 'embeddings_cache.json';
 
   async initialize() {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('🔒 Inicialização do modelo desativada em produção.');
+    }
+
     if (!this.initialized) {
       console.log('Carregando modelo de embeddings...');
       try {
-        // Modelo multilíngue otimizado para português
         this.embedder = await pipeline('feature-extraction', 'Xenova/multilingual-e5-small');
         this.initialized = true;
         console.log('✅ Modelo carregado com sucesso!');
@@ -42,23 +41,19 @@ class FreeEmbeddingsService {
 
   async createEmbedding(text: string): Promise<number[]> {
     await this.initialize();
-    
-  
+
     const cleanText = this.preprocessText(text);
-    
-    const output = await this.embedder(cleanText, { 
-      pooling: 'mean', 
-      normalize: true 
+
+    const output = await this.embedder(cleanText, {
+      pooling: 'mean',
+      normalize: true
     });
-    
+
     return Array.from(output.data);
   }
 
   private preprocessText(text: string): string {
-    return text
-      .trim()
-      .replace(/\s+/g, ' ') // Normalizar espaços
-      .slice(0, 512); // Limitar tamanho para performance
+    return text.trim().replace(/\s+/g, ' ').slice(0, 512);
   }
 
   private cosineSimilarity(vecA: number[], vecB: number[]): number {
@@ -69,8 +64,8 @@ class FreeEmbeddingsService {
   }
 
   async searchSimilarDocuments(
-    query: string, 
-    documents: Document[], 
+    query: string,
+    documents: Document[],
     topK: number = 3,
     minSimilarity: number = 0.5
   ): Promise<SearchResult[]> {
@@ -79,13 +74,9 @@ class FreeEmbeddingsService {
       const results: SearchResult[] = [];
 
       for (const doc of documents) {
-        if (!doc.embedding) {
-          console.warn(`Documento ${doc.id} não tem embedding`);
-          continue;
-        }
-
+        if (!doc.embedding) continue;
         const similarity = this.cosineSimilarity(queryEmbedding, doc.embedding);
-        
+
         if (similarity >= minSimilarity) {
           results.push({
             document: doc,
@@ -97,156 +88,45 @@ class FreeEmbeddingsService {
       return results
         .sort((a, b) => b.similarity - a.similarity)
         .slice(0, topK);
-        
     } catch (error) {
       console.error('❌ Erro na busca:', error);
       return [];
     }
   }
 
-  async createDocumentEmbeddings(documents: Document[]): Promise<Document[]> {
-    console.log(`📚 Criando embeddings para ${documents.length} documentos...`);
-    
-    const embeddedDocs: Document[] = [];
-    let processed = 0;
-
-    for (const doc of documents) {
-      try {
-        // Dividir documentos longos em chunks menores
-        const chunks = this.splitIntoChunks(doc.content, 1000);
-        
-        if (chunks.length === 1) {
-          // Documento pequeno - embedding direto
-          const embedding = await this.createEmbedding(doc.content);
-          embeddedDocs.push({
-            ...doc,
-            embedding: embedding
-          });
-        } else {
-          // Documento grande - criar chunks separados
-          for (let i = 0; i < chunks.length; i++) {
-            const embedding = await this.createEmbedding(chunks[i]);
-            embeddedDocs.push({
-              id: `${doc.id}_chunk_${i}`,
-              content: chunks[i],
-              metadata: {
-                ...doc.metadata,
-                title: `${doc.metadata.title} (Parte ${i + 1})`
-              },
-              embedding: embedding
-            });
-          }
-        }
-
-        processed++;
-        console.log(`✅ Processado ${processed}/${documents.length}: ${doc.metadata.title}`);
-        
-      } catch (error) {
-        console.error(`❌ Erro ao processar ${doc.id}:`, error);
-        // Adicionar sem embedding em caso de erro
-        embeddedDocs.push(doc);
-      }
-    }
-
-    return embeddedDocs;
-  }
-
-  private splitIntoChunks(text: string, maxLength: number): string[] {
-    const sentences = text.split(/[.!?]+/);
-    const chunks: string[] = [];
-    let currentChunk = '';
-
-    for (const sentence of sentences) {
-      const trimmedSentence = sentence.trim();
-      if (!trimmedSentence) continue;
-
-      if ((currentChunk + trimmedSentence).length <= maxLength) {
-        currentChunk += (currentChunk ? '. ' : '') + trimmedSentence;
-      } else {
-        if (currentChunk) {
-          chunks.push(currentChunk);
-        }
-        currentChunk = trimmedSentence;
-      }
-    }
-
-    if (currentChunk) {
-      chunks.push(currentChunk);
-    }
-
-    return chunks.length > 0 ? chunks : [text.slice(0, maxLength)];
-  }
-
-  async saveEmbeddingsCache(documents: Document[]): Promise<void> {
-    try {
-      await fs.writeFile(this.CACHE_FILE, JSON.stringify(documents, null, 2));
-      console.log(`💾 Cache salvo em ${this.CACHE_FILE}`);
-    } catch (error) {
-      console.error('❌ Erro ao salvar cache:', error);
-    }
-  }
-
   async loadEmbeddingsCache(): Promise<Document[]> {
     try {
-      const res = await fetch('/embeddings_cache.json');
+      const base = typeof window !== 'undefined'
+        ? ''
+        : process.env.PUBLIC_BASE_URL || 'https://proj4-severuspt.onrender.com';
+
+      const res = await fetch(`${base}/embeddings_cache.json`);
+      if (!res.ok) throw new Error(`Erro HTTP: ${res.status}`);
+
       const documents = await res.json();
       console.log(`📖 Cache carregado: ${documents.length} documentos`);
       return documents;
     } catch (error) {
-      console.log('ℹ️ Cache não encontrado ou erro ao carregar:', error);
+      console.error('⚠️ Erro ao carregar cache de embeddings:', error);
       return [];
     }
   }
-
-  async cacheExists(): Promise<boolean> {
-    try {
-      await fs.access(this.CACHE_FILE);
-      return true;
-    } catch {
-      return false;
-    }
-  }
 }
 
-// Instância singleton
 const embeddingsService = new FreeEmbeddingsService();
 
-// Funções principais para uso no projeto
 export async function getEmbeddedDocuments(): Promise<Document[]> {
-  try {
-    const base = typeof window !== 'undefined'
-      ? ''
-      : process.env.PUBLIC_BASE_URL || 'https://proj4-severuspt.onrender.com';
-
-    const res = await fetch(`${base}/embeddings_cache.json`);
-    
-    if (!res.ok) {
-      throw new Error(`Erro ao carregar embeddings: ${res.status}`);
-    }
-
-    const documents = await res.json();
-    console.log(`📖 Cache carregado: ${documents.length} documentos`);
-    return documents;
-  } catch (error) {
-    console.error('❌ Erro ao carregar cache de embeddings:', error);
-    return [];
-  }
+  return await embeddingsService.loadEmbeddingsCache();
 }
 
-
 export async function searchSimilarDocuments(
-  query: string, 
-  documents: Document[], 
+  query: string,
+  documents: Document[],
   topK: number = 3
 ): Promise<SearchResult[]> {
   return await embeddingsService.searchSimilarDocuments(query, documents, topK, 0.7);
 }
 
-export async function createEmbeddingsFromDocuments(documents: Document[]): Promise<Document[]> {
-  const embeddedDocs = await embeddingsService.createDocumentEmbeddings(documents);
-  await embeddingsService.saveEmbeddingsCache(embeddedDocs);
-  return embeddedDocs;
-}
-
+// Exportações adicionais
 export { embeddingsService };
 export type { Document, SearchResult };
