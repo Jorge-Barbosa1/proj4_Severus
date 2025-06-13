@@ -213,15 +213,26 @@ const embeddingsService = new FreeEmbeddingsService();
 
 // Funções principais para uso no projeto
 export async function getEmbeddedDocuments(): Promise<Document[]> {
-  // Tentar carregar do cache primeiro
-  if (await embeddingsService.cacheExists()) {
-    return await embeddingsService.loadEmbeddingsCache();
+  try {
+    const base = typeof window !== 'undefined'
+      ? ''
+      : process.env.PUBLIC_BASE_URL || 'https://proj4-severuspt.onrender.com';
+
+    const res = await fetch(`${base}/embeddings_cache.json`);
+    
+    if (!res.ok) {
+      throw new Error(`Erro ao carregar embeddings: ${res.status}`);
+    }
+
+    const documents = await res.json();
+    console.log(`📖 Cache carregado: ${documents.length} documentos`);
+    return documents;
+  } catch (error) {
+    console.error('❌ Erro ao carregar cache de embeddings:', error);
+    return [];
   }
-  
-  console.log('⚠️ Cache de embeddings não encontrado!');
-  console.log('Execute: npm run create-embeddings');
-  return [];
 }
+
 
 export async function searchSimilarDocuments(
   query: string, 
