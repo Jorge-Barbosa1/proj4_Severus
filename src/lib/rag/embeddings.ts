@@ -2,6 +2,11 @@
 import { pipeline } from '@xenova/transformers';
 import fs from 'fs/promises';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 
 type Document = {
   id: string;
@@ -23,7 +28,7 @@ type SearchResult = {
 class FreeEmbeddingsService {
   private embedder: any = null;
   private initialized = false;
-  private readonly CACHE_FILE = 'embeddings_cache.json';
+  private readonly CACHE_FILE = path.resolve(__dirname, '../../../static/embeddings_cache.json');
 
   async initialize() {
     if (!this.initialized) {
