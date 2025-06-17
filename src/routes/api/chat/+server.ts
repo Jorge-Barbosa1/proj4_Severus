@@ -34,7 +34,7 @@ export const POST: RequestHandler = async ({ request }) => {
       // Timeout para operações RAG (máximo 8 segundos)
       const ragPromise = performRAGSearch(lastUserMessage.content);
       const timeoutPromise = new Promise<string>((_, reject) => 
-        setTimeout(() => reject(new Error('RAG timeout')), 8000)
+        setTimeout(() => reject(new Error('RAG timeout')), 12000) // 12 segundos para procura de contexto
       );
       
       context = await Promise.race([ragPromise, timeoutPromise]);
