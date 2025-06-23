@@ -7,9 +7,14 @@
   import ChatWidget from '$lib/components/ChatBot/ChatWidget.svelte';
 
   // Estado da tab com persistência 
-   let mode: 'mapper' | 'analyst' = 'mapper';
+  let mode: 'mapper' | 'analyst' = 'mapper';
   let openSection = mode; // inicializa com o mode atual
- 
+
+  // Mostrar painel de camadas sobre o mapa
+  let showLayersPanel = false;
+  function toggleLayersPanel() {
+    showLayersPanel = !showLayersPanel;
+  }
 
   onMount(() => {
     const saved = localStorage.getItem('selectedMode');
@@ -22,10 +27,9 @@
     localStorage.setItem('selectedMode', newMode);
   }
 
-  // Function to swith from the analyst to the mapper and vice-versa
   function switchToSection(section) {
     openSection = section;
-    switchMode(section); // chama a tua função existente switchMode
+    switchMode(section);
   }
 
   let mapComponent: Map;
@@ -56,7 +60,7 @@
   let generatedMaps = [];
   let mapComponentDebug = null;
 
-  type BurnedLayer = { id: string; label: string; year: string; visible: boolean };
+  type BurnedLayer = { id: string; label: string; year: string; visible: boolean; geojson: any; options: any; };
   let burnedLayers: BurnedLayer[] = [];
 
   const datasets = ['ICNF burned areas', 'EFFIS burned areas'];
@@ -121,22 +125,16 @@
           postFireEnd = postFireEndObj.toISOString().split('T')[0];
 
           // Configurar datas para Analyst
-          const formattedFireDate = fireDate.split('T')[0];
-          fireDate = formattedFireDate;
-
+          fireDate = fireDate.split('T')[0];
           startDate = preFireStart;
           endDate = postFireEnd;
         }
 
         if (mapComponent) {
-          try {
-            mapComponent.addBurnedAreaLayer('selected-area', {
-              type: 'FeatureCollection',
-              features: [feature]
-            }, { color: 'yellow', fillOpacity: 0.7 });
-          } catch (err) {
-            console.error('Error adding burned area layer:', err);
-          }
+          mapComponent.addBurnedAreaLayer('selected-area', {
+            type: 'FeatureCollection',
+            features: [feature]
+          }, { color: 'yellow', fillOpacity: 0.7 });
         }
       } catch (err) {
         console.error(err);
@@ -148,63 +146,57 @@
     document.addEventListener('addTileLayer', (e: any) => {
       const { id, url, options } = e.detail;
       if (mapComponent && typeof mapComponent.addTileLayer === 'function') {
-        try {
-          mapComponent.addTileLayer(id, url, options);
-        } catch (err) {
-          console.error('Erro ao adicionar tile layer via evento:', err);
-        }
+        mapComponent.addTileLayer(id, url, options);
       }
     });
   });
 
   async function addLayerToMap() {
-    if (!selectedDataset || !selectedYear) return;
-    isLoading = true;
+  if (!selectedDataset || !selectedYear) return;
+  isLoading = true;
 
-    try {
-      const dsType = selectedDataset === 'ICNF burned areas' ? 'ICNF' : 'EFFIS';
-      const res = await fetch('/api/gee/burned-areas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dataset: dsType, year: parseInt(selectedYear) })
-      });
+  try {
+    const dsType = selectedDataset === 'ICNF burned areas' ? 'ICNF' : 'EFFIS';
+    const res = await fetch('/api/gee/burned-areas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dataset: dsType, year: parseInt(selectedYear) })
+    });
 
-      const geojson = await res.json();
-      const id = `${selectedDataset}-${selectedYear}`;
-      
-      if (mapComponent) {
-        try {
-          mapComponent.addBurnedAreaLayer(id, geojson, {
-            color: dsType === 'ICNF' ? 'red' : 'black',
-            fillOpacity: 0.5
-          });
-        } catch (err) {
-          console.error('Error adding burned area layer:', err);
-        }
-      }
-      
-      if (!burnedLayers.find(l => l.id === id)) {
-        burnedLayers = [...burnedLayers, { id, label: selectedDataset, year: selectedYear, visible: true }];
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      isLoading = false;
+    const geojson = await res.json();
+    const id = `${selectedDataset}-${selectedYear}`;
+    const options = {
+      color: dsType === 'ICNF' ? 'red' : 'black',
+      fillOpacity: 0.5
+    };
+
+    
+    mapComponent.addBurnedAreaLayer(id, geojson, options);
+
+    
+    if (!burnedLayers.find(l => l.id === id)) {
+      burnedLayers = [
+        ...burnedLayers,
+        { id, label: selectedDataset, year: selectedYear, visible: true, geojson, options }
+      ];
     }
+  } catch (err) {
+    console.error(err);
+  } finally {
+    isLoading = false;
   }
+}
+  function toggleLayerVisibility(layer: BurnedLayer, visible: boolean) {
+  layer.visible = visible;
 
-  function toggleLayerVisibility(layer: BurnedLayer) {
-    layer.visible = !layer.visible;
-    if (layer.visible && mapComponent) {
-      addLayerToMap();
-    } else if (mapComponent) {
-      try {
-        mapComponent.removeBurnedAreaLayer(layer.id);
-      } catch (err) {
-        console.error('Error removing layer:', err);
-      }
-    }
+  if (visible) {
+    // re-adiciona com os dados que você guardou
+    mapComponent.addBurnedAreaLayer(layer.id, layer.geojson, layer.options);
+  } else {
+    mapComponent.removeBurnedAreaLayer(layer.id);
   }
+}
+
 
   function handleMapsGenerated(event: CustomEvent) {
     const { maps } = event.detail;
@@ -248,6 +240,8 @@
     showAdvancedOptions = !showAdvancedOptions;
   }
 </script>
+
+
 
 <div class="app-container {isDarkMode ? 'dark-theme' : ''} {sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}">
   <header class="app-header">
@@ -311,34 +305,7 @@
               <span class="button-text">Adicionar camada</span>
             </button>
             
-            {#if burnedLayers.length > 0}
-              <div class="layers-container">
-                <h4>Camadas ativas <span class="badge">{burnedLayers.length}</span></h4>
-                <div class="layers-list">
-                  {#each burnedLayers as layer (layer.id)}
-                    <div class="layer-card">
-                      <div class="layer-content">
-                        <div class="toggle-switch">
-                          <input 
-                            type="checkbox" 
-                            id={`layer-${layer.id}`} 
-                            bind:checked={layer.visible} 
-                            on:change={() => toggleLayerVisibility(layer)} 
-                          />
-                          <label for={`layer-${layer.id}`}></label>
-                        </div>
-                        <div class="layer-info">
-                          <div class="layer-title">{layer.label}</div>
-                          <div class="layer-year">{layer.year}</div>
-                        </div>
-                      </div>
-                    </div>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-          </div>
-        </div>
+            
         
         <!-- NOVO: Secção Mapper -->
         <div class="panel {openSection === 'mapper' ? 'active' : ''}">
@@ -500,12 +467,34 @@
           <div class="card-actions">
             <span class="map-tip tooltip">
               <span class="tooltip-icon">ℹ️</span>
-              <span class="tooltip-text">Clique no mapa para selecionar uma área queimada ou desenhe uma área de interesse</span>
+              <span class="tooltip-text">
+                Clique no mapa para selecionar uma área queimada ou desenhe uma área de interesse
+              </span>
             </span>
           </div>
         </div>
-        
         <div class="card-body map-container">
+          <!-- Botão para abrir/fechar o painel de camadas -->
+          <button class="layers-toggle-btn" on:click={toggleLayersPanel}>
+            Layers
+          </button>
+
+          {#if showLayersPanel}
+            <div class="layers-overlay">
+              <h4>Camadas Ativas <span class="badge">{burnedLayers.length}</span></h4>
+              {#each burnedLayers as layer (layer.id)}
+                <div class="layer-card">
+                  <input
+                    type="checkbox"
+                    checked={layer.visible}
+                    on:change={(e) => toggleLayerVisibility(layer, e.currentTarget.checked)}
+                  />
+                  <span>{layer.label} — {layer.year}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
           <Map bind:this={mapComponent} />
         </div>
       </div>
@@ -1211,6 +1200,39 @@
   .map-container {
     height: 400px;
     width: 100%;
+    position: relative;
+  }
+
+    
+  .layers-toggle-btn {
+    position: absolute;
+    /* alinhado ao lado esquerdo, mesmo container */
+    left: 10px;
+    /* empurra pra baixo além dos ~50px dos controles de zoom */
+    top: 80px;
+    z-index: 1000;
+    background: var(--bg-secondary);
+    border: none;
+    padding: 8px 12px;
+    border-radius: var(--border-radius-sm);
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+  }
+
+  
+  .layers-overlay {
+    position: absolute;
+    left: 10px;
+    top: 120px; /* um pouco abaixo do botão */
+    z-index: 1000;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    max-height: 300px;
+    overflow-y: auto;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    padding: 10px;
+    width: 200px;
   }
 
   .analysis-container {
