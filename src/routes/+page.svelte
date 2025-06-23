@@ -14,6 +14,7 @@
   onMount(() => {
     const saved = localStorage.getItem('selectedMode');
     if (saved === 'mapper' || saved === 'analyst') mode = saved;
+  
   });
 
   function switchMode(newMode: 'mapper' | 'analyst') {
@@ -209,38 +210,29 @@
     const { maps } = event.detail;
     generatedMaps = maps;
     showSeverityMap = true;
-    
-    if (mapComponent && maps.length > 0) {
-      const tileUrl = maps[0].tileUrl;
-      
-      try {
-        if (typeof mapComponent.addTileLayer === 'function') {
-          mapComponent.addTileLayer('severity-layer', tileUrl, {
-            opacity: 0.75,
-            attribution: 'Burn Severity (GEE)'
-          });
-        } else if (typeof mapComponent.addLayer === 'function') {
-          mapComponent.addLayer('severity-layer', tileUrl, {
-            opacity: 0.75,
-            attribution: 'Burn Severity (GEE)'
-          });
-        } else if (mapComponent.getMap && typeof mapComponent.getMap === 'function') {
-          const leafletMap = mapComponent.getMap();
-          if (leafletMap && window.L) {
-            const tileLayer = window.L.tileLayer(tileUrl, {
-              opacity: 0.75,
-              attribution: 'Burn Severity (GEE)'
-            });
-            tileLayer.addTo(leafletMap);
-          }
-        } else {
-          console.warn('Métodos de adicionar tile layer não encontrados no componente Map');
-          console.log('Métodos disponíveis:', Object.getOwnPropertyNames(mapComponent));
-        }
-      } catch (err) {
-        console.error('Erro ao adicionar camada de severidade:', err);
-      }
-    }
+
+    if (!mapComponent) return;
+
+    /* Remove camadas antigas */
+    Object.keys(mapComponent['tileLayers'] ?? {})
+          .filter(id => id.startsWith('severity-'))
+          .forEach(id => mapComponent.removeBurnedAreaLayer?.(id)   // se implementado
+                      || mapComponent.getMap?.()?.removeLayer(mapComponent['tileLayers'][id]));
+
+    /* Adiciona cada tile devolvido */
+    maps.forEach(({ name, tileUrl }, i) => {
+      const layerId = `severity-${name}-${i}`;
+      mapComponent.addTileLayer(layerId, tileUrl, {
+        opacity: 0.75,
+        attribution: `Burn Severity • ${name}`
+      });
+    });
+  }
+  function handleImageListGenerated(event: CustomEvent) {
+    const { preImageIds, postImageIds } = event.detail;
+    // -- exibe num modal, console.log ou grava no estado para ser mostrado
+    console.log('Imagens pré-incêndio:', preImageIds);
+    console.log('Imagens pós-incêndio:', postImageIds);
   }
 
   function toggleDarkMode() {
@@ -536,7 +528,13 @@
               postStart={postFireStart}
               postEnd={postFireEnd}
               applySegmentation={applySegmentation}
+              segmKernel={3}
+              segmDnbrThresh={0.1}
+              segmCvaThresh={0.05}
+              segmMinPix={100}
+              cloudCoverMax={20}
               on:mapsGenerated={handleMapsGenerated}
+              on:imageListGenerated={handleImageListGenerated}
             />
           {:else}
             <FireAnalyst

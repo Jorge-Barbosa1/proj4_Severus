@@ -1,28 +1,25 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
 
-  interface Props {
-    geometry: any;
-    satellite: string;
-    preStart: string;
-    preEnd: string;
-    postStart: string;
-    postEnd: string;
-    applySegmentation: boolean;
-  }
+  /* -------- props vindas do +page -------- */
+  export let geometry: any;
+  export let satellite = '';
+  export let preStart = '';
+  export let preEnd = '';
+  export let postStart = '';
+  export let postEnd = '';
+  export let applySegmentation = false;
 
-  let {
-    geometry,
-    satellite,
-    preStart,
-    preEnd,
-    postStart,
-    postEnd,
-    applySegmentation
-  }: Props = $props();
+  /* -------- parâmetros avançados -------- */
+  export let segmKernel = 3;
+  export let segmDnbrThresh = 0.1;
+  export let segmCvaThresh = 0.05;
+  export let segmMinPix = 100;
+  export let cloudCoverMax = 20;
 
-  let error = $state('');
-  let generated = $state(false);
+  /* -------- estado local -------- */
+  let error = '';
+  let generated = false;
 
   const dispatch = createEventDispatcher();
 
@@ -30,7 +27,10 @@
     error = '';
     generated = false;
 
-    if (!geometry || !satellite || !preStart || !preEnd || !postStart || !postEnd) {
+    if (
+      !geometry || !satellite ||
+      !preStart || !preEnd || !postStart || !postEnd
+    ) {
       error = 'Faltam parâmetros necessários para gerar o mapa.';
       return;
     }
@@ -46,43 +46,33 @@
           preEnd,
           postStart,
           postEnd,
-          applySegmentation
+          applySegmentation,
+          segmParams: {
+            kernel: segmKernel,
+            dnbr: segmDnbrThresh,
+            cva: segmCvaThresh,
+            minPix: segmMinPix
+          },
+          cloudCoverMax
         })
       });
 
-      if (!res.ok) throw new Error('Erro ao chamar API');
+      if (!res.ok) throw new Error(await res.text());
 
-      const { maps } = await res.json();
+      const { maps, meta } = await res.json();
 
-      if (!maps || maps.length === 0 || !maps[0].tileUrl) {
-        error = 'tileUrl não foi retornado pela API.';
+      if (!maps || maps.length === 0 || maps.some((m: any) => !m.tileUrl)) {
+        error = 'A API não devolveu os tiles esperados.';
         return;
       }
 
-      const tileUrl = maps[0].tileUrl;
-      const bounds = maps[0].bounds;
-      
-      console.log('TILE URL GEE:', tileUrl);
-
-      if (!tileUrl) {
-        error = 'tileUrl não foi retornado pela API.';
-        return;
-      }
-
-      dispatch('mapsGenerated', {
-        maps: [
-          {
-            name: 'Mapa de Severidade',
-            tileUrl,
-            description: 'Mapa gerado com GEE',
-            bounds
-          }
-        ]
-      });
+      /* dispara eventos para o componente-pai */
+      dispatch('mapsGenerated', { maps });
+      if (meta) dispatch('imageListGenerated', meta);
 
       generated = true;
-    } catch (err) {
-      console.error(err);
+    } catch (e: any) {
+      console.error(e);
       error = 'Erro ao gerar o mapa de severidade.';
     }
   }
@@ -96,7 +86,7 @@
   {:else}
     <div class="selected-area-message">
       <p>✓ Área queimada selecionada</p>
-      <button onclick={generateSeverityMap} class="generate-button">
+      <button class="generate-button" on:click={generateSeverityMap}>
         Gerar Mapa de Severidade
       </button>
     </div>
@@ -107,7 +97,7 @@
   {/if}
 
   {#if generated}
-    <p class="success">Mapa gerado com sucesso</p>
+    <p class="success">Mapas gerados com sucesso</p>
   {/if}
 </div>
 

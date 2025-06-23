@@ -245,6 +245,12 @@
     return found;
   }
 
+  export function removeTileLayer(id: string) {
+  if (tileLayers[id]) {
+    map.removeLayer(tileLayers[id]);
+    delete tileLayers[id];
+  }
+}
 </script>
 
 <div id="map" style="width: 100%; height: 100%; min-height: 400px;"></div>
