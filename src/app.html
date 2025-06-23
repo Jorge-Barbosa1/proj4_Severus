@@ -1,13 +1,19 @@
 <!doctype html>
 <html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" href="%sveltekit.assets%/favicon.png" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<script src="https://earthengine.googleapis.com/v1alpha/bundle.js"></script>
-		%sveltekit.head%
-	</head>
-	<body data-sveltekit-preload-data="hover">
-		<div style="display: contents">%sveltekit.body%</div>
-	</body>
+  <head>
+    <meta charset="utf-8" />
+    
+    <link rel="icon" href="/favicon.png" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Importa o CSS global (está em static/app.css) -->
+    <link rel="stylesheet" href="/app.css" />
+
+    <script src="https://earthengine.googleapis.com/v1alpha/bundle.js"></script>
+    %sveltekit.head%
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
 </html>
