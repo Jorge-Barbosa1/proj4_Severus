@@ -36,24 +36,15 @@
     }
 
     try {
-      const res = await fetch('/api/gee/severity-maps', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          geometry,
+       const res = await fetch('/api/gee/severity-maps', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
           satellite,
-          preStart,
-          preEnd,
-          postStart,
-          postEnd,
+          geometry,
+          preStart, preEnd, postStart, postEnd,
           applySegmentation,
-          segmParams: {
-            kernel: segmKernel,
-            dnbr: segmDnbrThresh,
-            cva: segmCvaThresh,
-            minPix: segmMinPix
-          },
-          cloudCoverMax
+          segmKernel, segmDnbrThresh, segmCvaThresh, segmMinPix
         })
       });
 

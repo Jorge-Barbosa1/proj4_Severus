@@ -1,14 +1,17 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { browser } from '$app/environment';
-  import Map from '$lib/components/map/Map.svelte';
-  import SeverityMapper from '$lib/components/map/SeverityMapper.svelte';
-  import FireAnalyst from '$lib/components/analyst/FireAnalyst.svelte';
-  import ChatWidget from '$lib/components/ChatBot/ChatWidget.svelte';
+  import { onMount } from "svelte";
+  import { browser } from "$app/environment";
+  import Map from "$lib/components/map/Map.svelte";
+  import SeverityMapper from "$lib/components/map/SeverityMapper.svelte";
+  import FireAnalyst from "$lib/components/analyst/FireAnalyst.svelte";
+  import ChatWidget from "$lib/components/ChatBot/ChatWidget.svelte";
 
-  // Estado da tab com persistência 
-  let mode: 'mapper' | 'analyst' = 'mapper';
+  // Estado da tab com persistência
+  let mode: "mapper" | "analyst" = "mapper";
   let openSection = mode; // inicializa com o mode atual
+
+  // Variável para controlar o modo de data
+  let dateMode: '1' | '2' | '3' = '1'; // 1: Pre/Post, 2: Fire Date, 3: Analysis Range
 
   // Mostrar painel de camadas sobre o mapa
   let showLayersPanel = false;
@@ -17,14 +20,13 @@
   }
 
   onMount(() => {
-    const saved = localStorage.getItem('selectedMode');
-    if (saved === 'mapper' || saved === 'analyst') mode = saved;
-  
+    const saved = localStorage.getItem("selectedMode");
+    if (saved === "mapper" || saved === "analyst") mode = saved;
   });
 
-  function switchMode(newMode: 'mapper' | 'analyst') {
+  function switchMode(newMode: "mapper" | "analyst") {
     mode = newMode;
-    localStorage.setItem('selectedMode', newMode);
+    localStorage.setItem("selectedMode", newMode);
   }
 
   function switchToSection(section) {
@@ -33,22 +35,97 @@
   }
 
   let mapComponent: Map;
-  let selectedDataset = '';
-  let selectedYear = '';
-  let selectedSatellite = '';
-  let selectedIndex = '';
-  
+  let selectedDataset = "";
+  let selectedYear = "";
+  let selectedSatellite = "";
+  let selectedIndex = "";
+
   // Datas para Mapper
-  let preFireStart = new Date().toISOString().split('T')[0];
-  let preFireEnd = new Date().toISOString().split('T')[0];
-  let postFireStart = new Date().toISOString().split('T')[0];
-  let postFireEnd = new Date().toISOString().split('T')[0];
-  let applySegmentation = false;
+  let preFireStart = new Date().toISOString().split("T")[0];
+  let preFireEnd = new Date().toISOString().split("T")[0];
+  let postFireStart = new Date().toISOString().split("T")[0];
+  let postFireEnd = new Date().toISOString().split("T")[0];
   
+  /* sliders / inputs específicos de cada modo */
+  let daysBefore = 30;
+  let daysAfter = 30;
+  /* modo 2 */
+  let preStart = preFireStart;
+  let preEnd = preFireEnd;
+  let postStart = postFireStart;
+  let postEnd = postFireEnd;
+  /* modo 3 */
+  let fireDate = "";
+  let fireDatePrev = fireDate;
+  let daysAfterPrev = 30;
+
+
+  $: ({ preFireStart, preFireEnd, postFireStart, postFireEnd } = (() => {
+    if (dateMode === '1' && fireDate) {
+      // ± range
+      const d = new Date(fireDate);
+      const preSta = new Date(d);
+      preSta.setDate(d.getDate() - daysBefore);
+      const preEnd = new Date(d);
+      preEnd.setDate(d.getDate() - 1);
+
+      const postSta = d;
+      const postEnd = new Date(d);
+      postEnd.setDate(d.getDate() + daysAfter);
+
+      return {
+        preFireStart: preSta.toISOString().slice(0, 10),
+        preFireEnd: preEnd.toISOString().slice(0, 10),
+        postFireStart: postSta.toISOString().slice(0, 10),
+        postFireEnd: postEnd.toISOString().slice(0, 10),
+      };
+    }
+
+    if (dateMode === '2') {
+      // 4 datas
+      return {
+        preFireStart: preStart,
+        preFireEnd: preEnd,
+        postFireStart: postStart,
+        postFireEnd: postEnd,
+      };
+    }
+
+    if (dateMode === '3' && fireDatePrev) {
+      // ano anterior
+      const d = new Date(fireDatePrev);
+      const postSta = d;
+      const postEnd = new Date(d);
+      postEnd.setDate(d.getDate() + daysAfterPrev);
+
+      const preSta = new Date(postSta);
+      preSta.setFullYear(postSta.getFullYear() - 1);
+      const preEnd = new Date(postEnd);
+      preEnd.setFullYear(postEnd.getFullYear() - 1);
+
+      return {
+        preFireStart: preSta.toISOString().slice(0, 10),
+        preFireEnd: preEnd.toISOString().slice(0, 10),
+        postFireStart: postSta.toISOString().slice(0, 10),
+        postFireEnd: postEnd.toISOString().slice(0, 10),
+      };
+    }
+
+    // fallback
+    return { preFireStart, preFireEnd, postFireStart, postFireEnd };
+  })());
+
+  // Configurações de segmentação
+  let applySegmentation = false;
+  let cloudCoverMax = 20; // Slider de cobertura de nuvens (em %)
+  let segmKernel = 3;
+  let segmDnbrThresh = 0.1;
+  let segmCvaThresh = 0.05;
+  let segmMinPix = 100;
+
   // Datas para Analyst
-  let fireDate = '';
-  let startDate = new Date().toISOString().split('T')[0];
-  let endDate = new Date().toISOString().split('T')[0];
+  let startDate = new Date().toISOString().split("T")[0];
+  let endDate = new Date().toISOString().split("T")[0];
   let analysisRangeDays = 30;
 
   let selectedGeometry: any = null;
@@ -60,81 +137,95 @@
   let generatedMaps = [];
   let mapComponentDebug = null;
 
-  type BurnedLayer = { id: string; label: string; year: string; visible: boolean; geojson: any; options: any; };
+  type BurnedLayer = {
+    id: string;
+    label: string;
+    year: string;
+    visible: boolean;
+    geojson: any;
+    options: any;
+  };
   let burnedLayers: BurnedLayer[] = [];
 
-  const datasets = ['ICNF burned areas', 'EFFIS burned areas'];
+  const datasets = ["ICNF burned areas", "EFFIS burned areas"];
   const icnfYears = Array.from({ length: 22 }, (_, i) => (2000 + i).toString());
-  const effisYears = [...icnfYears, '2022', '2023'];
+  const effisYears = [...icnfYears, "2022", "2023"];
 
   const satelliteLabels = {
-    MODIS: 'Terra/MODIS',
-    Landsat5: 'Landsat-5/TM',
-    Landsat7: 'Landsat-7/ETM',
-    Landsat8: 'Landsat-8/OLI',
-    Sentinel2: 'Sentinel-2/MSI'
+    MODIS: "Terra/MODIS",
+    Landsat5: "Landsat-5/TM",
+    Landsat7: "Landsat-7/ETM",
+    Landsat8: "Landsat-8/OLI",
+    Landsat9: "Landsat-9/OLI",
+    Sentinel2: "Sentinel-2/MSI",
+    HLS: "HLS (S2+L8)",
   };
   const satellites = Object.values(satelliteLabels);
-  const indices = ['NBR', 'NDVI'];
+  const indices = ["NBR", "NDVI"];
 
-  $: years = selectedDataset === 'ICNF burned areas' ? icnfYears : effisYears;
+  $: years = selectedDataset === "ICNF burned areas" ? icnfYears : effisYears;
 
   onMount(() => {
     if (!browser) return;
 
-    document.addEventListener('geometryDrawn', (e: any) => {
+    document.addEventListener("geometryDrawn", (e: any) => {
       selectedGeometry = e.detail;
     });
 
-    document.addEventListener('mapClicked', async (e: any) => {
+    document.addEventListener("mapClicked", async (e: any) => {
       const { lat, lon } = e.detail;
       if (!selectedDataset || !selectedYear) return;
 
       try {
         isLoading = true;
-        const res = await fetch('/api/gee/severity-maps', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        const res = await fetch("/api/gee/severity-maps", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             lat,
             lon,
-            dataset: selectedDataset === 'ICNF burned areas' ? 'ICNF' : 'EFFIS',
-            year: parseInt(selectedYear)
-          })
+            dataset: selectedDataset === "ICNF burned areas" ? "ICNF" : "EFFIS",
+            year: parseInt(selectedYear),
+          }),
         });
 
         const feature = await res.json();
         selectedGeometry = feature.geometry;
-        fireDate = feature.properties.fire_date || feature.properties.data_inici || '';
+        fireDate =
+          feature.properties.fire_date || feature.properties.data_inici || "";
 
         if (fireDate) {
           const fireDateObj = new Date(fireDate);
-          
+
           // Configurar datas para Mapper
           const preFireStartObj = new Date(fireDateObj);
           preFireStartObj.setDate(preFireStartObj.getDate() - 30);
-          preFireStart = preFireStartObj.toISOString().split('T')[0];
+          preFireStart = preFireStartObj.toISOString().split("T")[0];
 
           const preFireEndObj = new Date(fireDateObj);
           preFireEndObj.setDate(preFireEndObj.getDate() - 1);
-          preFireEnd = preFireEndObj.toISOString().split('T')[0];
+          preFireEnd = preFireEndObj.toISOString().split("T")[0];
 
-          postFireStart = fireDate.split('T')[0];
+          postFireStart = fireDate.split("T")[0];
           const postFireEndObj = new Date(fireDateObj);
           postFireEndObj.setDate(postFireEndObj.getDate() + 30);
-          postFireEnd = postFireEndObj.toISOString().split('T')[0];
+          postFireEnd = postFireEndObj.toISOString().split("T")[0];
 
           // Configurar datas para Analyst
-          fireDate = fireDate.split('T')[0];
+          fireDate = fireDate.split("T")[0];
           startDate = preFireStart;
           endDate = postFireEnd;
         }
 
         if (mapComponent) {
-          mapComponent.addBurnedAreaLayer('selected-area', {
-            type: 'FeatureCollection',
-            features: [feature]
-          }, { color: 'yellow', fillOpacity: 0.7 });
+          mapComponent.addBurnedAreaLayer(
+            "selected-area",
+            {
+              type: "FeatureCollection",
+              features: [feature],
+            },
+            { color: "yellow", fillOpacity: 0.7 },
+          );
         }
       } catch (err) {
         console.error(err);
@@ -143,93 +234,101 @@
       }
     });
 
-    document.addEventListener('addTileLayer', (e: any) => {
+    document.addEventListener("addTileLayer", (e: any) => {
       const { id, url, options } = e.detail;
-      if (mapComponent && typeof mapComponent.addTileLayer === 'function') {
+      if (mapComponent && typeof mapComponent.addTileLayer === "function") {
         mapComponent.addTileLayer(id, url, options);
       }
     });
   });
 
   async function addLayerToMap() {
-  if (!selectedDataset || !selectedYear) return;
-  isLoading = true;
+    if (!selectedDataset || !selectedYear) return;
+    isLoading = true;
 
-  try {
-    const dsType = selectedDataset === 'ICNF burned areas' ? 'ICNF' : 'EFFIS';
-    const res = await fetch('/api/gee/burned-areas', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dataset: dsType, year: parseInt(selectedYear) })
-    });
+    try {
+      const dsType = selectedDataset === "ICNF burned areas" ? "ICNF" : "EFFIS";
+      const res = await fetch("/api/gee/burned-areas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataset: dsType, year: parseInt(selectedYear) }),
+      });
 
-    const geojson = await res.json();
-    const id = `${selectedDataset}-${selectedYear}`;
-    const options = {
-      color: dsType === 'ICNF' ? 'red' : 'black',
-      fillOpacity: 0.5
-    };
+      const geojson = await res.json();
+      const id = `${selectedDataset}-${selectedYear}`;
+      const options = {
+        color: dsType === "ICNF" ? "red" : "black",
+        fillOpacity: 0.5,
+      };
 
-    
-    mapComponent.addBurnedAreaLayer(id, geojson, options);
+      //adiciona a camada ao mapa
+      mapComponent.addBurnedAreaLayer(id, geojson, options);
 
-    
-    if (!burnedLayers.find(l => l.id === id)) {
-      burnedLayers = [
-        ...burnedLayers,
-        { id, label: selectedDataset, year: selectedYear, visible: true, geojson, options }
-      ];
+      //guarda Tudo na lista
+      if (!burnedLayers.find((l) => l.id === id)) {
+        burnedLayers = [
+          ...burnedLayers,
+          {
+            id,
+            label: selectedDataset,
+            year: selectedYear,
+            visible: true,
+            geojson,
+            options,
+          },
+        ];
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      isLoading = false;
     }
-  } catch (err) {
-    console.error(err);
-  } finally {
-    isLoading = false;
   }
-}
+
   function toggleLayerVisibility(layer: BurnedLayer, visible: boolean) {
-  layer.visible = visible;
+    layer.visible = visible;
 
-  if (visible) {
-    // re-adiciona com os dados que você guardou
-    mapComponent.addBurnedAreaLayer(layer.id, layer.geojson, layer.options);
-  } else {
-    mapComponent.removeBurnedAreaLayer(layer.id);
+    if (visible) {
+      // re-adiciona com os dados
+      mapComponent.addBurnedAreaLayer(layer.id, layer.geojson, layer.options);
+    } else {
+      mapComponent.removeBurnedAreaLayer(layer.id);
+    }
   }
-}
-
 
   function handleMapsGenerated(event: CustomEvent) {
     const { maps } = event.detail;
     generatedMaps = maps;
     showSeverityMap = true;
-
     if (!mapComponent) return;
 
-    /* Remove camadas antigas */
-    Object.keys(mapComponent['tileLayers'] ?? {})
-          .filter(id => id.startsWith('severity-'))
-          .forEach(id => mapComponent.removeBurnedAreaLayer?.(id)   // se implementado
-                      || mapComponent.getMap?.()?.removeLayer(mapComponent['tileLayers'][id]));
+    /* ——— remover camadas antigas de severidade ——— */
+    Object.keys(mapComponent["tileLayers"] ?? {})
+      .filter((id) => id.startsWith("severity-"))
+      .forEach((id) => {
+        if (mapComponent.removeTileLayer) {
+          // método criado no Map.svelte
+          mapComponent.removeTileLayer(id);
+        } else if (mapComponent.getMap) {
+          const map = mapComponent.getMap();
+          const tl = mapComponent["tileLayers"]?.[id];
+          if (map && tl) map.removeLayer(tl);
+        }
+      });
 
-    /* Adiciona cada tile devolvido */
+    /* ——— adicionar novas camadas ——— */
     maps.forEach(({ name, tileUrl }, i) => {
       const layerId = `severity-${name}-${i}`;
       mapComponent.addTileLayer(layerId, tileUrl, {
         opacity: 0.75,
-        attribution: `Burn Severity • ${name}`
+        attribution: `Burn Severity • ${name}`,
       });
     });
   }
-  function handleImageListGenerated(event: CustomEvent) {
-    const { preImageIds, postImageIds } = event.detail;
-    // -- exibe num modal, console.log ou grava no estado para ser mostrado
-    console.log('Imagens pré-incêndio:', preImageIds);
-    console.log('Imagens pós-incêndio:', postImageIds);
-  }
 
-  function toggleDarkMode() {
-    isDarkMode = !isDarkMode;
-    document.body.classList.toggle('dark-mode');
+  function handleImageListGenerated(e: CustomEvent) {
+    const { preImageIds, postImageIds } = e.detail;
+    console.log("Pré-fogo:", preImageIds, "Pós-fogo:", postImageIds);
   }
 
   function toggleSidebar() {
@@ -241,20 +340,22 @@
   }
 </script>
 
-
-
-<div class="app-container {isDarkMode ? 'dark-theme' : ''} {sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}">
+<div
+  class="app-container {isDarkMode ? 'dark-theme' : ''} {sidebarOpen
+    ? 'sidebar-open'
+    : 'sidebar-closed'}"
+>
   <header class="app-header">
     <div class="toggle-sidebar-btn" on:click={toggleSidebar}>
       <span></span><span></span><span></span>
     </div>
-    
+
     <div class="logo">
       <img src="/severus.png" alt="SeverusPT Logo" class="logo-image" />
     </div>
-    
-    <div class="header-actions"></div>  <!-- This <div> is used solely to center the logo within the header.-->
 
+    <div class="header-actions"></div>
+    <!-- This <div> is used solely to center the logo within the header.-->
   </header>
 
   <main class="main-content">
@@ -262,10 +363,10 @@
       <div class="sidebar-header">
         <h2>Painel de Controlo</h2>
         <div class="mode-indicator">
-          {mode === 'mapper' ? 'Modo: Severidade' : 'Modo: Análise'}
+          {mode === "mapper" ? "Modo: Severidade" : "Modo: Análise"}
         </div>
       </div>
-      
+
       <div class="accordion-panels">
         <!-- Panel 1: Burned Areas (sempre visível) -->
         <div class="panel active">
@@ -274,7 +375,7 @@
             <h3>Áreas Queimadas</h3>
             <div class="panel-toggle">▼</div>
           </div>
-          
+
           <div class="panel-content">
             <div class="form-group">
               <label for="dataset">Fonte de dados</label>
@@ -287,7 +388,7 @@
                 </select>
               </div>
             </div>
-            
+
             <div class="form-group">
               <label for="year">Ano</label>
               <div class="select-wrapper">
@@ -299,167 +400,283 @@
                 </select>
               </div>
             </div>
-            
-            <button class="action-button" on:click={addLayerToMap} disabled={isLoading || !selectedDataset || !selectedYear}>
+
+            <button
+              class="action-button"
+              on:click={addLayerToMap}
+              disabled={isLoading || !selectedDataset || !selectedYear}
+            >
               <span class="button-icon">+</span>
               <span class="button-text">Adicionar camada</span>
             </button>
-            
-            
-        
-        <!-- NOVO: Secção Mapper -->
-        <div class="panel {openSection === 'mapper' ? 'active' : ''}">
-          <div class="panel-heading" on:click={() => switchToSection('mapper')}>
-            <div class="step-indicator">🗺️</div>
-            <h3>Mapper - Severidade</h3>
-            <div class="panel-toggle">{openSection === 'mapper' ? '▼' : '►'}</div>
-          </div>
-          
-          {#if openSection === 'mapper'}
-            <div class="panel-content">
-              <div class="form-group">
-                <label for="satellite-mapper">Satélite/Sensor</label>
-                <div class="select-wrapper">
-                  <select id="satellite-mapper" bind:value={selectedSatellite}>
-                    <option value="">Selecione satélite/sensor</option>
-                    {#each satellites as satellite}
-                      <option value={satellite}>{satellite}</option>
-                    {/each}
-                  </select>
+
+            <!-- NOVO: Secção Mapper -->
+            <div class="panel {openSection === 'mapper' ? 'active' : ''}">
+              <div
+                class="panel-heading"
+                on:click={() => switchToSection("mapper")}
+              >
+                <div class="step-indicator">🗺️</div>
+                <h3>Mapper - Severidade</h3>
+                <div class="panel-toggle">
+                  {openSection === "mapper" ? "▼" : "►"}
                 </div>
               </div>
 
-              <div class="date-section">
-                <h4>Período Pré-Incêndio</h4>
-                <div class="date-group">
+              {#if openSection === "mapper"}
+                <div class="panel-content">
                   <div class="form-group">
-                    <label for="pre-fire-start">Data inicial</label>
-                    <input id="pre-fire-start" type="date" bind:value={preFireStart} />
-                  </div>
-                  
-                  <div class="form-group">
-                    <label for="pre-fire-end">Data final</label>
-                    <input id="pre-fire-end" type="date" bind:value={preFireEnd} />
-                  </div>
-                </div>
-                
-                <h4>Período Pós-Incêndio</h4>
-                <div class="date-group">
-                  <div class="form-group">
-                    <label for="post-fire-start">Data inicial</label>
-                    <input id="post-fire-start" type="date" bind:value={postFireStart} />
-                  </div>
-                  
-                  <div class="form-group">
-                    <label for="post-fire-end">Data final</label>
-                    <input id="post-fire-end" type="date" bind:value={postFireEnd} />
-                  </div>
-                </div>
-              </div>
-              
-              <div class="advanced-options">
-                <button class="toggle-advanced" on:click={toggleAdvancedOptions}>
-                  {showAdvancedOptions ? '▼' : '►'} Opções avançadas
-                </button>
-                
-                {#if showAdvancedOptions}
-                  <div class="advanced-content">
-                    <div class="form-group">
-                      <label class="checkbox-label">
-                        <input type="checkbox" bind:checked={applySegmentation} />
-                        <span>Aplicar segmentação de áreas queimadas</span>
-                      </label>
-                      <p class="help-text">Remove pequenas áreas e suaviza os resultados</p>
+                    <label for="satellite-mapper">Satélite/Sensor</label>
+                    <div class="select-wrapper">
+                      <select
+                        id="satellite-mapper"
+                        bind:value={selectedSatellite}
+                      >
+                        <option value="">Selecione satélite/sensor</option>
+                        {#each satellites as satellite}
+                          <option value={satellite}>{satellite}</option>
+                        {/each}
+                      </select>
                     </div>
                   </div>
-                {/if}
-              </div>
+
+                  <!-- === (#3) Escolha do modo de datas === -->
+                  <h4>Período pré-/pós-fogo</h4>
+
+                  <label class="checkbox-label">
+                    <input
+                      type="radio"
+                      name="datemode"
+                      value="1"
+                      bind:group={dateMode}
+                    />
+                    Fire date ± intervalo de dias
+                  </label>
+
+                  <label class="checkbox-label">
+                    <input
+                      type="radio"
+                      name="datemode"
+                      value="2"
+                      bind:group={dateMode}
+                    />
+                    4 datas específicas
+                  </label>
+
+                  <label class="checkbox-label">
+                    <input
+                      type="radio"
+                      name="datemode"
+                      value="3"
+                      bind:group={dateMode}
+                    />
+                    Comparar com ano anterior
+                  </label>
+
+                  <!-- ——— MODO 1 ——— -->
+                  {#if dateMode === '1'}
+                    <div class="date-section">
+                      <label>Data do incêndio</label>
+                      <input type="date" bind:value={fireDate} />
+
+                      <label>Dias antes — {daysBefore}</label>
+                      <input
+                        type="range"
+                        min="1"
+                        max="120"
+                        bind:value={daysBefore}
+                      />
+
+                      <label>Dias depois — {daysAfter}</label>
+                      <input
+                        type="range"
+                        min="1"
+                        max="120"
+                        bind:value={daysAfter}
+                      />
+                    </div>
+                  {/if}
+
+                  <!-- ——— MODO 2 ——— -->
+                  {#if dateMode === '2'}
+                    <div class="date-section">
+                      <h5>Pré-fogo</h5>
+                      <input type="date" bind:value={preStart} />
+                      <input type="date" bind:value={preEnd} />
+
+                      <h5>Pós-fogo</h5>
+                      <input type="date" bind:value={postStart} />
+                      <input type="date" bind:value={postEnd} />
+                    </div>
+                  {/if}
+
+                  <!-- ——— MODO 3 ——— -->
+                  {#if dateMode === '3'}
+                    <div class="date-section">
+                      <label>Data do incêndio</label>
+                      <input type="date" bind:value={fireDatePrev} />
+
+                      <label>Dias pós-fogo — {daysAfterPrev}</label>
+                      <input
+                        type="range"
+                        min="1"
+                        max="120"
+                        bind:value={daysAfterPrev}
+                      />
+                    </div>
+                  {/if}
+
+                  <label>Nebulosidade máxima (%) — {cloudCoverMax}</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    bind:value={cloudCoverMax}
+                  />
+
+                  <div class="advanced-options">
+                    <button
+                      class="toggle-advanced"
+                      on:click={toggleAdvancedOptions}
+                    >
+                      {showAdvancedOptions ? "▼" : "►"} Opções avançadas
+                    </button>
+
+                    {#if showAdvancedOptions}
+                      <div class="segm-panel">
+                        <label>Kernel (px) {segmKernel}</label>
+                        <input
+                          type="range"
+                          min="1"
+                          max="20"
+                          step="1"
+                          bind:value={segmKernel}
+                        />
+                        <label>dNBR threshold {segmDnbrThresh}</label>
+                        <input type="number" min="0" max="2" step="0.01" bind:value={segmDnbrThresh} />
+                        <label>CVA threshold {segmCvaThresh}</label>
+                        <input type="number" min="0" max="1" step="0.01" bind:value={segmCvaThresh} />
+                        <label>Mín. pixéis {segmMinPix}</label>
+                        <input type="number" min="1" max="10000" step="1" bind:value={segmMinPix} />
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+              {/if}
             </div>
-          {/if}
-        </div>
-        
-        <!-- NOVO: Secção Analyst -->
-        <div class="panel {openSection === 'analyst' ? 'active' : ''}">
-          <div class="panel-heading" on:click={() => switchToSection('analyst')}>
-            <div class="step-indicator">📊</div>
-            <h3>Analyst - Análise</h3>
-            <div class="panel-toggle">{openSection === 'analyst' ? '▼' : '►'}</div>
-          </div>
-          
-          {#if openSection === 'analyst'}
-            <div class="panel-content">
-              <div class="form-group">
-                <label for="satellite-analyst">Satélite/Sensor</label>
-                <div class="select-wrapper">
-                  <select id="satellite-analyst" bind:value={selectedSatellite}>
-                    <option value="">Selecione satélite/sensor</option>
-                    {#each satellites as satellite}
-                      <option value={satellite}>{satellite}</option>
-                    {/each}
-                  </select>
+
+            <!-- NOVO: Secção Analyst -->
+            <div class="panel {openSection === 'analyst' ? 'active' : ''}">
+              <div
+                class="panel-heading"
+                on:click={() => switchToSection("analyst")}
+              >
+                <div class="step-indicator">📊</div>
+                <h3>Analyst - Análise</h3>
+                <div class="panel-toggle">
+                  {openSection === "analyst" ? "▼" : "►"}
                 </div>
               </div>
 
-              <div class="form-group">
-                <label for="index">Índice Espectral</label>
-                <div class="select-wrapper">
-                  <select id="index" bind:value={selectedIndex}>
-                    <option value="">Selecione índice</option>
-                    {#each indices as index}
-                      <option value={index}>{index}</option>
-                    {/each}
-                  </select>
-                </div>
-              </div>
-
-              <div class="form-group">
-                <label for="fire-date">Data do Incêndio</label>
-                <input id="fire-date" type="date" bind:value={fireDate} />
-              </div>
-
-              <div class="date-section">
-                <h4>Período de Análise</h4>
-                <div class="date-group">
+              {#if openSection === "analyst"}
+                <div class="panel-content">
                   <div class="form-group">
-                    <label for="start-date">Data inicial</label>
-                    <input id="start-date" type="date" bind:value={startDate} />
-                  </div>
-                  
-                  <div class="form-group">
-                    <label for="end-date">Data final</label>
-                    <input id="end-date" type="date" bind:value={endDate} />
-                  </div>
-                </div>
-
-                <div class="form-group">
-                  <label for="analysis-range">Dias de análise <span class="value-indicator">{analysisRangeDays}</span></label>
-                  <input id="analysis-range" type="range" min="7" max="90" bind:value={analysisRangeDays} />
-                </div>
-              </div>
-              
-              <div class="advanced-options">
-                <button class="toggle-advanced" on:click={toggleAdvancedOptions}>
-                  {showAdvancedOptions ? '▼' : '►'} Opções avançadas
-                </button>
-                
-                {#if showAdvancedOptions}
-                  <div class="advanced-content">
-                    <div class="form-group">
-                      <label class="checkbox-label">
-                        <input type="checkbox" />
-                        <span>Incluir análise de vegetação</span>
-                      </label>
-                      <p class="help-text">Adiciona métricas de recuperação da vegetação</p>
+                    <label for="satellite-analyst">Satélite/Sensor</label>
+                    <div class="select-wrapper">
+                      <select
+                        id="satellite-analyst"
+                        bind:value={selectedSatellite}
+                      >
+                        <option value="">Selecione satélite/sensor</option>
+                        {#each satellites as satellite}
+                          <option value={satellite}>{satellite}</option>
+                        {/each}
+                      </select>
                     </div>
                   </div>
-                {/if}
-              </div>
+
+                  <div class="form-group">
+                    <label for="index">Índice Espectral</label>
+                    <div class="select-wrapper">
+                      <select id="index" bind:value={selectedIndex}>
+                        <option value="">Selecione índice</option>
+                        {#each indices as index}
+                          <option value={index}>{index}</option>
+                        {/each}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="fire-date">Data do Incêndio</label>
+                    <input id="fire-date" type="date" bind:value={fireDate} />
+                  </div>
+
+                  <div class="date-section">
+                    <h4>Período de Análise</h4>
+                    <div class="date-group">
+                      <div class="form-group">
+                        <label for="start-date">Data inicial</label>
+                        <input
+                          id="start-date"
+                          type="date"
+                          bind:value={startDate}
+                        />
+                      </div>
+
+                      <div class="form-group">
+                        <label for="end-date">Data final</label>
+                        <input id="end-date" type="date" bind:value={endDate} />
+                      </div>
+                    </div>
+
+                    <div class="form-group">
+                      <label for="analysis-range"
+                        >Dias de análise <span class="value-indicator"
+                          >{analysisRangeDays}</span
+                        ></label
+                      >
+                      <input
+                        id="analysis-range"
+                        type="range"
+                        min="7"
+                        max="90"
+                        bind:value={analysisRangeDays}
+                      />
+                    </div>
+                  </div>
+
+                  <div class="advanced-options">
+                    <button
+                      class="toggle-advanced"
+                      on:click={toggleAdvancedOptions}
+                    >
+                      {showAdvancedOptions ? "▼" : "►"} Opções avançadas
+                    </button>
+
+                    {#if showAdvancedOptions}
+                      <div class="advanced-content">
+                        <div class="form-group">
+                          <label class="checkbox-label">
+                            <input type="checkbox" />
+                            <span>Incluir análise de vegetação</span>
+                          </label>
+                          <p class="help-text">
+                            Adiciona métricas de recuperação da vegetação
+                          </p>
+                        </div>
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+              {/if}
             </div>
-          {/if}
+          </div>
         </div>
       </div>
     </aside>
-    
+
     <section class="content-area">
       <div class="card map-card">
         <div class="card-header">
@@ -468,7 +685,8 @@
             <span class="map-tip tooltip">
               <span class="tooltip-icon">ℹ️</span>
               <span class="tooltip-text">
-                Clique no mapa para selecionar uma área queimada ou desenhe uma área de interesse
+                Clique no mapa para selecionar uma área queimada ou desenhe uma
+                área de interesse
               </span>
             </span>
           </div>
@@ -481,13 +699,16 @@
 
           {#if showLayersPanel}
             <div class="layers-overlay">
-              <h4>Camadas Ativas <span class="badge">{burnedLayers.length}</span></h4>
+              <h4>
+                Camadas Ativas <span class="badge">{burnedLayers.length}</span>
+              </h4>
               {#each burnedLayers as layer (layer.id)}
                 <div class="layer-card">
                   <input
                     type="checkbox"
                     checked={layer.visible}
-                    on:change={(e) => toggleLayerVisibility(layer, e.currentTarget.checked)}
+                    on:change={(e) =>
+                      toggleLayerVisibility(layer, e.currentTarget.checked)}
                   />
                   <span>{layer.label} — {layer.year}</span>
                 </div>
@@ -498,17 +719,21 @@
           <Map bind:this={mapComponent} />
         </div>
       </div>
-      
+
       <div class="card analysis-card">
         <div class="card-header">
-          <h2>{mode === 'mapper' ? 'Mapas de Severidade' : 'Análise de Incêndios'}</h2>
+          <h2>
+            {mode === "mapper" ? "Mapas de Severidade" : "Análise de Incêndios"}
+          </h2>
           <div class="card-actions">
-            <span class="stats-badge">{mode === 'mapper' ? 'NBR' : selectedIndex || 'Análise'}</span>
+            <span class="stats-badge"
+              >{mode === "mapper" ? "NBR" : selectedIndex || "Análise"}</span
+            >
           </div>
         </div>
-        
+
         <div class="card-body analysis-container">
-          {#if mode === 'mapper'}
+          {#if mode === "mapper"}
             <SeverityMapper
               geometry={selectedGeometry}
               satellite={selectedSatellite}
@@ -516,27 +741,27 @@
               preEnd={preFireEnd}
               postStart={postFireStart}
               postEnd={postFireEnd}
-              applySegmentation={applySegmentation}
-              segmKernel={3}
-              segmDnbrThresh={0.1}
-              segmCvaThresh={0.05}
-              segmMinPix={100}
-              cloudCoverMax={20}
+              {applySegmentation}
+              {segmKernel}
+              {segmDnbrThresh}
+              {segmCvaThresh}
+              {segmMinPix}
+              {cloudCoverMax}
               on:mapsGenerated={handleMapsGenerated}
               on:imageListGenerated={handleImageListGenerated}
             />
           {:else}
             <FireAnalyst
               geometry={selectedGeometry}
-              fireDate={fireDate}
+              {fireDate}
               satellite={selectedSatellite}
               index={selectedIndex}
-              startDate={startDate}
-              endDate={endDate}
-              analysisRangeDays={analysisRangeDays}
+              {startDate}
+              {endDate}
+              {analysisRangeDays}
             />
           {/if}
-          
+
           {#if mapComponentDebug}
             <div class="debug-info">
               <p>Map component type: {mapComponentDebug}</p>
@@ -546,7 +771,7 @@
       </div>
     </section>
   </main>
-  
+
   {#if isLoading}
     <div class="loading-overlay">
       <div class="loader">
@@ -557,18 +782,18 @@
       </div>
     </div>
   {/if}
-  
+
   <ChatWidget />
 </div>
 
 <style>
   /* Modern Variables */
   :root {
-    --primary: #FF4B2B;
-    --primary-light: #FF7A59;
-    --primary-dark: #E62C00;
-    --accent: #5C7CFA;
-    --accent-dark: #4263EB;
+    --primary: #ff4b2b;
+    --primary-light: #ff7a59;
+    --primary-dark: #e62c00;
+    --accent: #5c7cfa;
+    --accent-dark: #4263eb;
     --success: #20c997;
     --warning: #fab005;
     --danger: #fa5252;
@@ -585,7 +810,8 @@
     --shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
     --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.1);
     --transition: all 0.25s cubic-bezier(0.645, 0.045, 0.355, 1);
-    --font-main: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-main: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      sans-serif;
   }
 
   /* Dark theme variables */
@@ -636,7 +862,7 @@
 
   /* Header */
   .app-header {
-    background: linear-gradient(90deg, #FF8C00, #4CAF50);
+    background: linear-gradient(90deg, #ff8c00, #4caf50);
     color: white;
     height: 64px;
     display: flex;
@@ -772,7 +998,7 @@
   /* Sidebar */
   .sidebar {
     width: 350px;
-    background-color:rgba(0, 0, 0, 0.1);
+    background-color: rgba(0, 0, 0, 0.1);
     box-shadow: 2px 0 6px rgba(0, 0, 0, 0.1);
     border-right: 1px solid #ddd;
     display: flex;
@@ -1203,7 +1429,6 @@
     position: relative;
   }
 
-    
   .layers-toggle-btn {
     position: absolute;
     /* alinhado ao lado esquerdo, mesmo container */
@@ -1219,7 +1444,6 @@
     box-shadow: var(--shadow-sm);
   }
 
-  
   .layers-overlay {
     position: absolute;
     left: 10px;
