@@ -6,21 +6,18 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { browser } from "$app/environment";
-  import type * as Leaflet from 'leaflet';   
-  import Map from '$lib/components/map/Map.svelte';
+  import type * as Leaflet from "leaflet";
+  import Map from "$lib/components/map/Map.svelte";
   import SeverityMapper from "$lib/components/map/SeverityMapper.svelte";
   import FireAnalyst from "$lib/components/analyst/FireAnalyst.svelte";
   import ChatWidget from "$lib/components/ChatBot/ChatWidget.svelte";
 
-
-
-  
   // Estado da tab com persistência
   let mode: "mapper" | "analyst" = "mapper";
   let openSection = mode; // inicializa com o mode atual
 
   // Variável para controlar o modo de data
-  let dateMode: '1' | '2' | '3' = '1'; // 1: Pre/Post, 2: Fire Date, 3: Analysis Range
+  let dateMode: "1" | "2" | "3" = "1"; // 1: Pre/Post, 2: Fire Date, 3: Analysis Range
 
   // Mostrar painel de camadas sobre o mapa
   let showLayersPanel = false;
@@ -54,7 +51,7 @@
   let preFireEnd = new Date().toISOString().split("T")[0];
   let postFireStart = new Date().toISOString().split("T")[0];
   let postFireEnd = new Date().toISOString().split("T")[0];
-  
+
   /* sliders / inputs específicos de cada modo */
   let daysBefore = 30;
   let daysAfter = 30;
@@ -68,9 +65,8 @@
   let fireDatePrev = fireDate;
   let daysAfterPrev = 30;
 
-
   $: ({ preFireStart, preFireEnd, postFireStart, postFireEnd } = (() => {
-    if (dateMode === '1' && fireDate) {
+    if (dateMode === "1" && fireDate) {
       // ± range
       const d = new Date(fireDate);
       const preSta = new Date(d);
@@ -90,7 +86,7 @@
       };
     }
 
-    if (dateMode === '2') {
+    if (dateMode === "2") {
       // 4 datas
       return {
         preFireStart: preStart,
@@ -100,7 +96,7 @@
       };
     }
 
-    if (dateMode === '3' && fireDatePrev) {
+    if (dateMode === "3" && fireDatePrev) {
       // ano anterior
       const d = new Date(fireDatePrev);
       const postSta = d;
@@ -145,9 +141,9 @@
   let showSeverityMap = false;
   let generatedMaps = [];
   let mapComponentDebug = null;
-  
-  // Tipos de camadas para severidade 
-  type SeverityLayer = { id:string;   name:string; visible:boolean };
+
+  // Tipos de camadas para severidade
+  type SeverityLayer = { id: string; name: string; visible: boolean };
   let severityLayers: SeverityLayer[] = [];
 
   type BurnedLayer = {
@@ -311,15 +307,13 @@
 
   function toggleSeverity(layer: SeverityLayer, visible: boolean){
     layer.visible = visible;
-    if (visible) {
-      mapComponent.addTileLayer(layer.id, /*já está carregada, basta*/ '', {});
-    } else {
-      mapComponent.removeTileLayer(layer.id);
-    }
-    // força redraw da lista
+    visible
+      ? mapComponent.showTileLayer(layer.id)
+      : mapComponent.hideTileLayer(layer.id);
+
+    // força reactive update da lista
     severityLayers = [...severityLayers];
   }
-
 
   function handleMapsGenerated(event: CustomEvent) {
     const { maps } = event.detail;
@@ -330,29 +324,25 @@
     /* ——— remover camadas antigas de severidade ——— */
     Object.keys(mapComponent["tileLayers"] ?? {})
       .filter((id) => id.startsWith("severity-"))
-      .forEach((id) => {
-        if (mapComponent.removeTileLayer) {
-          // método criado no Map.svelte
-          mapComponent.removeTileLayer(id);
-        } else if (mapComponent.getMap) {
-          const map = mapComponent.getMap();
-          const tl = mapComponent["tileLayers"]?.[id];
-          if (map && tl) map.removeLayer(tl);
-        }
-      severityLayers = maps.map(({ name }, i) => ({
-        id   : `severity-${name}-${i}`,
-        name,
-        visible: true
-      }));
-      });
+      .forEach((id) => mapComponent.hideTileLayer?.(id)); // só esconder
 
-    /* ——— adicionar novas camadas ——— */
+    /* ——— novo array para o overlay ——— */
+    severityLayers = maps.map(({ name, tileUrl }, i) => ({
+      id: `severity-${name}-${i}`,
+      name,
+      tileUrl,
+      visible: true,
+    }));
+
+    /* ——— adicionar ao mapa se ainda não existirem ——— */
     maps.forEach(({ name, tileUrl }, i) => {
       const layerId = `severity-${name}-${i}`;
-      mapComponent.addTileLayer(layerId, tileUrl, {
-        opacity: 0.75,
-        attribution: `Burn Severity • ${name}`,
-      });
+      if (!mapComponent["tileLayers"]?.[layerId])
+        mapComponent.addTileLayer(layerId, tileUrl, {
+          opacity: 0.75,
+          attribution: `Burn Severity • ${name}`,
+        });
+      else mapComponent.showTileLayer(layerId);
     });
   }
 
@@ -504,7 +494,7 @@
                   </label>
 
                   <!-- ——— MODO 1 ——— -->
-                  {#if dateMode === '1'}
+                  {#if dateMode === "1"}
                     <div class="date-section">
                       <label>Data do incêndio</label>
                       <input type="date" bind:value={fireDate} />
@@ -528,7 +518,7 @@
                   {/if}
 
                   <!-- ——— MODO 2 ——— -->
-                  {#if dateMode === '2'}
+                  {#if dateMode === "2"}
                     <div class="date-section">
                       <h5>Pré-fogo</h5>
                       <input type="date" bind:value={preStart} />
@@ -541,7 +531,7 @@
                   {/if}
 
                   <!-- ——— MODO 3 ——— -->
-                  {#if dateMode === '3'}
+                  {#if dateMode === "3"}
                     <div class="date-section">
                       <label>Data do incêndio</label>
                       <input type="date" bind:value={fireDatePrev} />
@@ -584,11 +574,29 @@
                           bind:value={segmKernel}
                         />
                         <label>dNBR threshold {segmDnbrThresh}</label>
-                        <input type="number" min="0" max="2" step="0.01" bind:value={segmDnbrThresh} />
+                        <input
+                          type="number"
+                          min="0"
+                          max="2"
+                          step="0.01"
+                          bind:value={segmDnbrThresh}
+                        />
                         <label>CVA threshold {segmCvaThresh}</label>
-                        <input type="number" min="0" max="1" step="0.01" bind:value={segmCvaThresh} />
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          bind:value={segmCvaThresh}
+                        />
                         <label>Mín. pixéis {segmMinPix}</label>
-                        <input type="number" min="1" max="10000" step="1" bind:value={segmMinPix} />
+                        <input
+                          type="number"
+                          min="1"
+                          max="10000"
+                          step="1"
+                          bind:value={segmMinPix}
+                        />
                       </div>
                     {/if}
                   </div>
@@ -745,9 +753,12 @@
               {/each}
               {#each severityLayers as layer (layer.id)}
                 <div class="layer-card">
-                  <input type="checkbox"
-                        checked={layer.visible}
-                        on:change={(e) => toggleSeverity(layer, e.currentTarget.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={layer.visible}
+                    on:change={(e) =>
+                      toggleSeverity(layer, e.currentTarget.checked)}
+                  />
                   <span>{layer.name}</span>
                 </div>
               {/each}
