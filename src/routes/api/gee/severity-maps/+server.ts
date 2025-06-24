@@ -7,6 +7,8 @@ import {
   normalizeSatelliteLabel
 } from '$lib/services/gee-service';
 
+
+
 /* ------------------------------------------------------------------ */
 /*  Paletas de visualização                                            */
 /* ------------------------------------------------------------------ */
@@ -51,6 +53,7 @@ export const POST: RequestHandler = async ({ request }) => {
       applySegmentation,
       segmKernel, segmDnbrThresh, segmCvaThresh, segmMinPix
     });
+    
 
     /* ---------- 3. Gerar tiles ---------- */
     const toTile = (

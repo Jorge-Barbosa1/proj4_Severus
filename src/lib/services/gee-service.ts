@@ -3,6 +3,7 @@
  *********************************************************************/
 
 import { getEE } from '$lib/utils/gee-utils';
+import ee from '@google/earthengine'; 
 
 /* ------------------------------------------------------------------ *
  * 1. TIPOS
@@ -32,8 +33,9 @@ type SatConf = {
   ic: string;                                         // ImageCollection ID
   scale: number;                                      // m/pixel
   bands: Record<'NDVI'|'NBR',[string,string]>;        // [NIR, RED/SWIR]
-  mask?: (img: any)=>any;                             // máscara de nuvens
   rescale?: (img: any)=>any;                          // reflectâncias
+  mask?: (img: any)=>any;                             // máscara de nuvens
+  
 };
 
 const SAT_CONF: Record<string, SatConf> = {
@@ -41,14 +43,8 @@ const SAT_CONF: Record<string, SatConf> = {
     ic   : 'COPERNICUS/S2_SR_HARMONIZED',
     scale: 20,
     bands: { NDVI:['B8','B4'], NBR:['B8','B12'] },
-    mask : (img)=>{
-      const qa=img.select('QA60');
-      const cloud=1<<10, cirrus=1<<11;
-      return img.updateMask(
-        qa.bitwiseAnd(cloud).eq(0).and( qa.bitwiseAnd(cirrus).eq(0) )
-      );
-    },
-    rescale: (img)=>img.divide(10_000)
+    mask : s2Mask,
+    rescale: s2Rescale
   },
 
   Landsat5: {
@@ -151,8 +147,8 @@ function getImageCollection(ee:any, sat:string, index:'NDVI'|'NBR'){
 
   return ee.ImageCollection(cfg.ic)
     .map(i=>{
-      if(cfg.rescale) i = cfg.rescale(i);
       if(cfg.mask   ) i = cfg.mask(i);
+      if(cfg.rescale) i = cfg.rescale(i);
       const [nir, redSwir] = cfg.bands[index];
       const idx = i.normalizedDifference([nir, redSwir]).rename(index);
       return idx.copyProperties(i,['system:time_start']);
@@ -252,9 +248,9 @@ export async function generateSeverityMaps(args: {
   const pre   = col.filterDate(args.preStart , args.preEnd ).median();
   const post  = col.filterDate(args.postStart, args.postEnd).median();
 
-  const dNBR  = pre.subtract(post).rename('dNBR');
-  const rdNBR = dNBR.divide(pre.sqrt()).rename('rdNBR');
-  const rbr   = dNBR.divide(pre.add(1.001)).rename('rbr');
+  const dNBR  = pre.subtract(post).rename('dNBR').clip(region);
+  const rdNBR = dNBR.divide(pre.sqrt()).rename('rdNBR').clip(region);
+  const rbr   = dNBR.divide(pre.add(1.001)).rename('rbr').clip(region);
 
   const classified = dNBR
     .where(dNBR.lte(0.1),1)
@@ -262,6 +258,7 @@ export async function generateSeverityMaps(args: {
     .where(dNBR.gt(0.27).and(dNBR.lte(0.44)),3)
     .where(dNBR.gt(0.44).and(dNBR.lte(0.66)),4)
     .where(dNBR.gt(0.66),5)
+    .clip(region)
     .rename('severity')
     .toInt16();
 
@@ -332,4 +329,23 @@ export async function getSeverityMap(lat: number, lon: number, dataset: string, 
     console.error('Erro na função getSeverityMap:', error);
     throw error;
   }
+}
+/* ───────────────── Sentinel-2: escala só as bandas ópticas que existirem ───────────────── */
+/* reflectâncias Sentinel-2 L2A */
+const S2_BANDS = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12'];
+
+/* 1 ─ mascarar (igual ao teu script) */
+function s2Mask(img: any) {
+  const qa = img.select('QA60');
+  const cloud  = 1 << 10;
+  const cirrus = 1 << 11;
+  const mask = qa.bitwiseAnd(cloud).eq(0)
+                 .and( qa.bitwiseAnd(cirrus).eq(0) );
+  return img.updateMask(mask);
+}
+
+/* 2 ─ manter só bandas ópticas + escalar */
+function s2Rescale(img: any) {
+  const refl = img.select(S2_BANDS).divide(1e4);
+  return ee.Image(img).addBands(refl, null, /*overwrite=*/true);
 }

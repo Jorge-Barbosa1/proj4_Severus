@@ -1,11 +1,20 @@
+<!-- desliga o SSR só nesta rota -->
+<script context="module" lang="ts">
+  export const ssr = false;
+</script>
+
 <script lang="ts">
   import { onMount } from "svelte";
   import { browser } from "$app/environment";
-  import Map from "$lib/components/map/Map.svelte";
+  import type * as Leaflet from 'leaflet';   
+  import Map from '$lib/components/map/Map.svelte';
   import SeverityMapper from "$lib/components/map/SeverityMapper.svelte";
   import FireAnalyst from "$lib/components/analyst/FireAnalyst.svelte";
   import ChatWidget from "$lib/components/ChatBot/ChatWidget.svelte";
 
+
+
+  
   // Estado da tab com persistência
   let mode: "mapper" | "analyst" = "mapper";
   let openSection = mode; // inicializa com o mode atual
@@ -136,6 +145,10 @@
   let showSeverityMap = false;
   let generatedMaps = [];
   let mapComponentDebug = null;
+  
+  // Tipos de camadas para severidade 
+  type SeverityLayer = { id:string;   name:string; visible:boolean };
+  let severityLayers: SeverityLayer[] = [];
 
   type BurnedLayer = {
     id: string;
@@ -296,6 +309,18 @@
     }
   }
 
+  function toggleSeverity(layer: SeverityLayer, visible: boolean){
+    layer.visible = visible;
+    if (visible) {
+      mapComponent.addTileLayer(layer.id, /*já está carregada, basta*/ '', {});
+    } else {
+      mapComponent.removeTileLayer(layer.id);
+    }
+    // força redraw da lista
+    severityLayers = [...severityLayers];
+  }
+
+
   function handleMapsGenerated(event: CustomEvent) {
     const { maps } = event.detail;
     generatedMaps = maps;
@@ -314,6 +339,11 @@
           const tl = mapComponent["tileLayers"]?.[id];
           if (map && tl) map.removeLayer(tl);
         }
+      severityLayers = maps.map(({ name }, i) => ({
+        id   : `severity-${name}-${i}`,
+        name,
+        visible: true
+      }));
       });
 
     /* ——— adicionar novas camadas ——— */
@@ -711,6 +741,14 @@
                       toggleLayerVisibility(layer, e.currentTarget.checked)}
                   />
                   <span>{layer.label} — {layer.year}</span>
+                </div>
+              {/each}
+              {#each severityLayers as layer (layer.id)}
+                <div class="layer-card">
+                  <input type="checkbox"
+                        checked={layer.visible}
+                        on:change={(e) => toggleSeverity(layer, e.currentTarget.checked)} />
+                  <span>{layer.name}</span>
                 </div>
               {/each}
             </div>
