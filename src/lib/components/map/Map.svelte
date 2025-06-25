@@ -6,6 +6,8 @@
   let map: any;
   let drawnItems: any;
   let drawControl: any;
+  let drawing = false;
+  
 
   const geoJsonLayers: Record<string, any> = {};
   const tileLayers: Record<string, any> = {};
@@ -33,22 +35,25 @@
     // 2) CSS primeiro
     await import("leaflet/dist/leaflet.css");
     await import("leaflet-draw/dist/leaflet.draw.css");
-
-    // 3) Plugin já fixo na 1.0.2
     await import("leaflet-draw");
 
-    /* ---- resto do teu código exatamente como estava ---- */
+
+    /* 2. cria o mapa */
     map = L.map("map").setView([39.5, -8], 7);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "© OpenStreetMap contributors",
     }).addTo(map);
 
-    /* GRUPO DE DESENHO */
+    /* 3. flag de desenho */
+    map.on(L.Draw.Event.DRAWSTART, () => drawing = true);
+    map.on(L.Draw.Event.DRAWSTOP , () => drawing = false);
+
+    /*4. GRUPO DE DESENHO */
     drawnItems = new L.FeatureGroup().addTo(map);
 
     /* AGUARDAR UM POUCO PARA O MAPA CARREGAR COMPLETAMENTE */
     setTimeout(() => {
-      /* TOOLBAR - Configuração para mostrar todos os botões */
+      /* TOOLBAR - Configuração corrigida para polígonos */
       drawControl = new L.Control.Draw({
         position: "topright",
         draw: {
@@ -64,17 +69,25 @@
             },
           },
           polygon: {
-            allowIntersection: false,
+            // Remover allowIntersection ou colocar como true
+            allowIntersection: true,
             showArea: true,
+            // Simplificar as opções de erro
             drawError: {
               color: "#e1e100",
-              message: "<strong>Erro:</strong> As linhas não se podem cruzar!",
+              message: "<strong>Erro:</strong> Forma inválida!",
             },
             shapeOptions: {
               color: "#ff7800",
               weight: 2,
               fillOpacity: 0.2,
             },
+            // Adicionar opções de repetição para facilitar o desenho
+            repeatMode: false,
+            // Permitir mais flexibilidade no desenho
+            showLength: true,
+            metric: true,
+            feet: false,
           },
         },
         edit: {
@@ -95,6 +108,7 @@
 
     /* TERMINOU DESENHO */
     map.on(L.Draw.Event.CREATED, (e: any) => {
+      console.log("Desenho criado:", e.layerType, e.layer);
       clearDrawings();
       drawnItems.addLayer(e.layer);
 
@@ -112,11 +126,13 @@
 
     /* QUANDO COMEÇA UM DESENHO */
     map.on(L.Draw.Event.DRAWSTART, (e: any) => {
+      console.log("Início do desenho:", e.layerType);
       clearDrawings(); // Limpa desenhos anteriores quando começa novo
     });
 
     /* QUANDO CANCELA DESENHO */
     map.on(L.Draw.Event.DRAWSTOP, (e: any) => {
+      console.log("Fim do desenho:", e.layerType);
       // Reset das opções se necessário
       if (e.layerType === "rectangle") {
         const rectHandler =
@@ -127,13 +143,24 @@
       }
     });
 
+    /* EVENTOS ADICIONAIS PARA DEBUG */
+    map.on(L.Draw.Event.DRAWVERTEX, (e: any) => {
+      console.log("Vértice adicionado:", e);
+    });
+
+    map.on(L.Draw.Event.EDITVERTEX, (e: any) => {
+      console.log("Vértice editado:", e);
+    });
+
     /* CLIQUE NORMAL NO MAPA */
     map.on("click", ({ latlng }) => {
-      document.dispatchEvent(
-        new CustomEvent("mapClicked", {
-          detail: { lat: latlng.lat, lon: latlng.lng },
-        }),
-      );
+      if (!drawing) {
+        document.dispatchEvent(
+          new CustomEvent("mapClicked", {
+            detail: { lat: latlng.lat, lon: latlng.lng },
+          }),
+        );
+      }
     });
 
     /* OUVIR PEDIDO PARA DESENHAR */
@@ -144,10 +171,23 @@
 
       switch (mode) {
         case "polygon": {
+          console.log("Ativando modo polígono");
           const polygonHandler =
             drawControl._toolbars.draw._modes.polygon?.handler;
           if (polygonHandler) {
+            // Garantir que as opções estão corretas
+            polygonHandler.setOptions({
+              allowIntersection: true,
+              showArea: true,
+              shapeOptions: {
+                color: "#ff7800",
+                weight: 2,
+                fillOpacity: 0.2,
+              }
+            });
             polygonHandler.enable();
+          } else {
+            console.error("Handler do polígono não encontrado");
           }
           break;
         }
@@ -194,6 +234,12 @@
       onEachFeature: (feature, lyr) => {
         // Clique para selecionar área ardida
         lyr.on("click", async (e: any) => {
+
+          if (drawing) {
+            // Se estiver a desenhar, não faz nada
+            return;
+          }
+
           clearDrawings();
 
           // Destacar a área selecionada
@@ -205,7 +251,7 @@
           });
 
           emitGeometry(lyr);
-          (await import("leaflet")).DomEvent.stopPropagation(e);
+          L.DomEvent.stopPropagation(e);
         });
 
         // Popup com informações da área ardida
