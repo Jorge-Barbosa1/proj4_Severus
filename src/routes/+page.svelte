@@ -428,16 +428,6 @@
 
 </script>
 
-{#if showSeverityMap}
-  <button
-    class="action-button"
-    on:click={downloadGeoTIFF}
-    disabled={!selectedSatellite}
-  >
-    ↓ Download GeoTIFF
-  </button>
-{/if}
-
 <div
   class="app-container {isDarkMode ? 'dark-theme' : ''} {sidebarOpen
     ? 'sidebar-open'
