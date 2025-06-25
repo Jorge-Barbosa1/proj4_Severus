@@ -932,6 +932,8 @@
     --gray: #495057;
     --gray-light: #adb5bd;
     --gray-lighter: #e9ecef;
+    --btn-start: #ff8c00;
+    --btn-end:   #4caf50;
     --light: #f8f9fa;
     --border-radius: 12px;
     --border-radius-sm: 8px;
@@ -1380,7 +1382,7 @@
     padding: 14px;
     border-radius: var(--border-radius-sm);
     border: none;
-    background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    background: linear-gradient(90deg, var(--btn-start), var(--btn-end));
     color: white;
     font-family: inherit;
     font-size: 0.95rem;

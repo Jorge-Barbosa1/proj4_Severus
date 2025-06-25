@@ -77,9 +77,9 @@
   {:else}
     <div class="selected-area-message">
       <p>✓ Área queimada selecionada</p>
-      <button class="generate-button" on:click={generateSeverityMap}>
-        Gerar Mapa de Severidade
-      </button>
+      <button class="action-button generate-button" on:click={generateSeverityMap}>
+       Gerar Mapa de Severidade
+     </button>
     </div>
   {/if}
 
@@ -93,30 +93,34 @@
 </div>
 
 <style>
-  .generate-button {
-    background-color: var(--accent);
-    color: white;
-    padding: 0.75rem 1.5rem;
-    font-size: 1rem;
-    border: none;
+
+:global(.action-button) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 14px;
     border-radius: var(--border-radius-sm);
+    border: none;
+    background: linear-gradient(90deg, var(--btn-start), var(--btn-end));
+    color: white;
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-weight: 500;
     cursor: pointer;
-    box-shadow: var(--shadow-sm);
+    transition: var(--transition);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
   }
 
-  .generate-button:hover {
-    background-color: var(--accent-dark);
+  :global(.action-button:hover:not(:disabled)) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
   }
 
-  .error {
-    color: var(--danger);
-    margin-top: 0.5rem;
-  }
-
-  .success {
-    color: var(--success);
-    margin-top: 0.5rem;
-  }
+.generate-button {
+  margin-top: 0.5rem;
+}
 
   .info-message {
     background-color: rgba(92, 124, 250, 0.1);

@@ -26,9 +26,8 @@
       'Landsat-8': 'LANDSAT/LC08/C02/T1_L2',
       'Sentinel-2': 'COPERNICUS/S2_SR_HARMONIZED'
     };
-      return map[label] ?? label;
-    }
-
+    return map[label] ?? label;
+  }
 
   async function plotTimeSeries() {
     if (!geometry || !satellite || !index || !startDate || !endDate) {
@@ -56,14 +55,10 @@
       }
 
       const { data } = await res.json();
-
       timeSeriesData = data.map((d: any) => ({
         x: new Date(d.date),
         y: d.value
       }));
-
-      console.log('📈 Dados reais da série temporal:', timeSeriesData);
-
       dispatch('timeSeriesReady', { data: timeSeriesData });
     } catch (err: any) {
       console.error(err);
@@ -73,7 +68,6 @@
     }
   }
 
-
   async function calculateSeverity() {
     if (!geometry || !fireDate) {
       alert('Selecione uma área e indique a data do incêndio.');
@@ -81,19 +75,11 @@
     }
     isLoading = true;
     try {
-      console.log('Params:', {
-        satellite: getSatelliteKey(satellite),
-        index,
-        fireDate,
-        windowSize: analysisRangeDays,
-        geometry
-      });
-
       const res = await fetch('/api/gee/severity', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          satellite: getSatelliteKey(satellite), // usa a chave curta para Earth Engine
+          satellite: getSatelliteKey(satellite),
           index,
           fireDate,
           windowSize: analysisRangeDays,
@@ -104,12 +90,10 @@
       if (!res.ok) throw new Error('Erro ao obter severidade');
 
       const { data } = await res.json();
-
       severityData = data.days.map((d, i) => ({
         days: d,
         delta: data.deltas[i]
       }));
-
       dispatch('severityReady', { data: severityData });
     } catch (err: any) {
       console.error(err);
@@ -118,22 +102,25 @@
       isLoading = false;
     }
   }
-
 </script>
 
 <div class="analysis-tools">
-  <button on:click={plotTimeSeries} disabled={isLoading}>📈 Gerar gráfico</button>
-  <button on:click={calculateSeverity} disabled={isLoading}>🔥 Calcular severidade</button>
+  <button class="action-button" on:click={plotTimeSeries} disabled={isLoading}>
+    📈 Gerar gráfico
+  </button>
+  <button class="action-button" on:click={calculateSeverity} disabled={isLoading}>
+    🔥 Calcular severidade
+  </button>
 </div>
 
 {#if timeSeriesData.length > 0}
   <TimeSeriesChart
-  data={timeSeriesData}
-  index={index}
-  title={`${index} - Série Temporal`}
-  xAxisLabel="Data"
-  yAxisLabel={index}
-/>
+    data={timeSeriesData}
+    index={index}
+    title={`${index} - Série Temporal`}
+    xAxisLabel="Data"
+    yAxisLabel={index}
+  />
 {/if}
 
 {#if severityData.length > 0}
@@ -147,19 +134,27 @@
     gap: 10px;
     margin-bottom: 20px;
   }
-  button {
+
+  /* Botões laranja em gradient */
+  .action-button {
     padding: 10px;
     border: none;
     border-radius: 5px;
-    background-color: #3498db;
+    background: linear-gradient(90deg, #ff8c00, #ffc107);
     color: white;
+    font-weight: 500;
     cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
   }
-  button:hover {
-    background-color: #2980b9;
+  .action-button:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
   }
-  button:disabled {
-    background-color: #aaa;
+  .action-button:disabled {
+    background: #e0e0e0;
+    color: #777;
     cursor: not-allowed;
+    box-shadow: none;
   }
 </style>
