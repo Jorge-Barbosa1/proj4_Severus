@@ -12,6 +12,23 @@
   import FireAnalyst from "$lib/components/analyst/FireAnalyst.svelte";
   import ChatWidget from "$lib/components/ChatBot/ChatWidget.svelte";
 
+  function bboxFromGeoJSON(geojson: any): [number,number][][] {
+    const ring = geojson.coordinates[0] as [number,number][];
+    const lons = ring.map(p => p[0]);
+    const lats = ring.map(p => p[1]);
+    const minLon = Math.min(...lons),
+          maxLon = Math.max(...lons),
+          minLat = Math.min(...lats),
+          maxLat = Math.max(...lats);
+    return [
+      [minLon, minLat],
+      [minLon, maxLat],
+      [maxLon, maxLat],
+      [maxLon, minLat],
+      [minLon, minLat]
+    ];
+  }
+
   // Estado da tab com persistência
   let mode: "mapper" | "analyst" = "mapper";
   let openSection = mode; // inicializa com o mode atual
@@ -358,7 +375,68 @@
   function toggleAdvancedOptions() {
     showAdvancedOptions = !showAdvancedOptions;
   }
+ async function downloadGeoTIFF() {
+  if (!selectedSatellite || !selectedGeometry) return;
+
+  // calcula só a bounding box de 5 pontos
+  const region = bboxFromGeoJSON(selectedGeometry);
+
+  const payload = {
+    type:      'Severity',
+    satellite: selectedSatellite,
+    preStart:  preFireStart,
+    preEnd:    preFireEnd,
+    postStart: postFireStart,
+    postEnd:   postFireEnd,
+    region     // só o array de 5 coordenadas
+  };
+
+  const res = await fetch('/api/gee/download', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    console.error('Download failed:', await res.text());
+    return;
+  }
+
+  // tenta extrair o filename dos headers
+  const cd = res.headers.get('Content-Disposition') || '';
+  let filename = '';
+  const match = cd.match(/filename="(.+)"/);
+  if (match) {
+    filename = match[1];
+  } else {
+    // fallback: usa content-type para decidir a extensão
+    const ct = res.headers.get('Content-Type') || '';
+    const ext = ct.includes('tiff') ? '.tif' : '.zip';
+    filename = `severity_${Date.now()}${ext}`;
+  }
+
+  const blob = await res.blob();
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 </script>
+
+{#if showSeverityMap}
+  <button
+    class="action-button"
+    on:click={downloadGeoTIFF}
+    disabled={!selectedSatellite}
+  >
+    ↓ Download GeoTIFF
+  </button>
+{/if}
 
 <div
   class="app-container {isDarkMode ? 'dark-theme' : ''} {sidebarOpen
@@ -782,41 +860,54 @@
         </div>
 
         <div class="card-body analysis-container">
-          {#if mode === "mapper"}
-            <SeverityMapper
-              geometry={selectedGeometry}
-              satellite={selectedSatellite}
-              preStart={preFireStart}
-              preEnd={preFireEnd}
-              postStart={postFireStart}
-              postEnd={postFireEnd}
-              {applySegmentation}
-              {segmKernel}
-              {segmDnbrThresh}
-              {segmCvaThresh}
-              {segmMinPix}
-              {cloudCoverMax}
-              on:mapsGenerated={handleMapsGenerated}
-              on:imageListGenerated={handleImageListGenerated}
-            />
-          {:else}
-            <FireAnalyst
-              geometry={selectedGeometry}
-              {fireDate}
-              satellite={selectedSatellite}
-              index={selectedIndex}
-              {startDate}
-              {endDate}
-              {analysisRangeDays}
-            />
-          {/if}
+  {#if mode === "mapper"}
+    <SeverityMapper
+      geometry={selectedGeometry}
+      satellite={selectedSatellite}
+      preStart={preFireStart}
+      preEnd={preFireEnd}
+      postStart={postFireStart}
+      postEnd={postFireEnd}
+      {applySegmentation}
+      {segmKernel}
+      {segmDnbrThresh}
+      {segmCvaThresh}
+      {segmMinPix}
+      {cloudCoverMax}
+      on:mapsGenerated={handleMapsGenerated}
+      on:imageListGenerated={handleImageListGenerated}
+    />
 
-          {#if mapComponentDebug}
-            <div class="debug-info">
-              <p>Map component type: {mapComponentDebug}</p>
-            </div>
-          {/if}
-        </div>
+    {#if showSeverityMap}
+      <div class="download-row" style="margin-top:1rem">
+        <button
+          class="action-button"
+          on:click={downloadGeoTIFF}
+          disabled={!selectedSatellite || !selectedGeometry}
+        >
+          ↓ Download GeoTIFF
+        </button>
+      </div>
+    {/if}
+
+  {:else}
+    <FireAnalyst
+      geometry={selectedGeometry}
+      {fireDate}
+      satellite={selectedSatellite}
+      index={selectedIndex}
+      {startDate}
+      {endDate}
+      {analysisRangeDays}
+    />
+  {/if}
+
+  {#if mapComponentDebug}
+    <div class="debug-info">
+      <p>Map component type: {mapComponentDebug}</p>
+    </div>
+  {/if}
+</div>
       </div>
     </section>
   </main>

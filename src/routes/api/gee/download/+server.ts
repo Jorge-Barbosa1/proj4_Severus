@@ -1,147 +1,158 @@
+// src/routes/api/gee/download/+server.ts
+
 import { getEE } from '$lib/utils/gee-utils';
 import type { RequestHandler } from '@sveltejs/kit';
 
-/* ------------------------------------------------------------------ */
-/* Configuração partilhada com severity-maps ------------------------- */
-type SatCfg = { collection: string; bands: [string, string]; scale: number; scaler: (img: any) => any };
+type SatCfg = {
+  collection: string;
+  bands: [string, string];
+  scale: number;
+  scaler: (img: any) => any;
+};
 
 const SAT_CFG: Record<string, SatCfg> = {
   'Sentinel-2/MSI': {
     collection: 'COPERNICUS/S2_SR_HARMONIZED',
     bands: ['B8', 'B12'],
     scale: 20,
-    scaler: (img) => img.divide(1e4)              // reflectância já em 0-10000
+    scaler: img => img.divide(1e4)
   },
   'Landsat-5/TM': {
     collection: 'LANDSAT/LT05/C02/T1_L2',
     bands: ['SR_B4', 'SR_B7'],
     scale: 30,
-    scaler: (img) => img.multiply(0.0000275).add(-0.2)
+    scaler: img => img.multiply(0.0000275).add(-0.2)
   },
   'Landsat-7/ETM': {
     collection: 'LANDSAT/LE07/C02/T1_L2',
     bands: ['SR_B4', 'SR_B7'],
     scale: 30,
-    scaler: (img) => img.multiply(0.0000275).add(-0.2)
+    scaler: img => img.multiply(0.0000275).add(-0.2)
   },
   'Landsat-8/OLI': {
     collection: 'LANDSAT/LC08/C02/T1_L2',
     bands: ['SR_B5', 'SR_B7'],
     scale: 30,
-    scaler: (img) => img.multiply(0.0000275).add(-0.2)
+    scaler: img => img.multiply(0.0000275).add(-0.2)
   },
-  'Landsat-9/OLI': {                             // caso queiras L9
+  'Landsat-9/OLI': {
     collection: 'LANDSAT/LC09/C02/T1_TOA',
     bands: ['B5', 'B7'],
     scale: 30,
-    scaler: (img) => img.multiply(0.0000275)
+    scaler: img => img.multiply(0.0000275)
   },
   'Terra/MODIS': {
     collection: 'MODIS/061/MOD09A1',
     bands: ['sur_refl_b02', 'sur_refl_b07'],
     scale: 500,
-    scaler: (img) => img.divide(1e4)
+    scaler: img => img.divide(1e4)
   },
   'HLS': {
     collection: 'NASA/HLS/HLSL30/v002',
     bands: ['B5', 'B7'],
     scale: 30,
-    scaler: (img) => img.divide(1e4)
+    scaler: img => img.divide(1e4)
   }
 };
-/* ------------------------------------------------------------------ */
 
-export const GET: RequestHandler = async ({ url }) => {
+export const POST: RequestHandler = async ({ request }) => {
   try {
-    const type       = url.searchParams.get('type');        // dNBR | RdNBR | RBR | Severity
-    const satellite  = url.searchParams.get('satellite');
-    const preStart   = url.searchParams.get('preStart');
-    const preEnd     = url.searchParams.get('preEnd');
-    const postStart  = url.searchParams.get('postStart');
-    const postEnd    = url.searchParams.get('postEnd');
-    const geometryQS = url.searchParams.get('geometry');    // JSON
+    const {
+      type,
+      satellite,
+      preStart, preEnd,
+      postStart, postEnd,
+      region    // Array de 5 pares [lon,lat]
+    } = await request.json();
 
-    if (!type || !satellite || !preStart || !preEnd || !postStart || !postEnd) {
-      return new Response('Missing required parameters', { status: 400 });
+    if (
+      !type ||
+      !satellite ||
+      !preStart ||
+      !preEnd ||
+      !postStart ||
+      !postEnd ||
+      !region
+    ) {
+      return new Response('Missing parameters', { status: 400 });
     }
 
-    const cfg = SAT_CFG[satellite];
-    if (!cfg) return new Response('Unsupported satellite', { status: 400 });
+    const satCfg = SAT_CFG[satellite];
+    if (!satCfg) {
+      return new Response('Invalid satellite', { status: 400 });
+    }
 
-    const ee   = await getEE();
-    const geom = geometryQS
-      ? ee.Geometry(JSON.parse(geometryQS))
-      : ee.Geometry.Rectangle([-180, -90, 180, 90]);
+    const ee = await getEE();
+    const regionGeom = ee.Geometry.Polygon([region]);
 
-    /* ---------- Colecção & NBR median pré / pós ---------- */
-    const makeNBR = (img: any) =>
-      cfg
-        .scaler(ee.Image(img).select(cfg.bands))
-        .normalizedDifference(cfg.bands)
+    // calcula o NBR pré e pós
+    const makeNbr = (col: any) =>
+      satCfg
+        .scaler(col.median())
+        .normalizedDifference(satCfg.bands)
         .rename('NBR');
 
-    const col  = ee.ImageCollection(cfg.collection).filterBounds(geom);
-    const pre  = col.filterDate(preStart,  preEnd ).map(makeNBR).median();
-    const post = col.filterDate(postStart, postEnd).map(makeNBR).median();
+    const preCol = ee.ImageCollection(satCfg.collection)
+      .filterDate(preStart, preEnd)
+      .filterBounds(regionGeom)
+      .select(satCfg.bands);
 
-    /* ---------- Construir raster conforme `type` ---------- */
-    let image: any;
-    let description = '';
+    const postCol = ee.ImageCollection(satCfg.collection)
+      .filterDate(postStart, postEnd)
+      .filterBounds(regionGeom)
+      .select(satCfg.bands);
 
-    switch (type) {
-      case 'dNBR':
-        image = pre.subtract(post).rename('dNBR');
-        description = 'Delta_NBR';
-        break;
-      case 'RdNBR':
-        image = pre.subtract(post).divide(pre.abs().sqrt()).rename('RdNBR');
-        description = 'Relativized_Delta_NBR';
-        break;
-      case 'RBR':
-        image = pre.subtract(post).divide(pre.add(1.001)).rename('RBR');
-        description = 'Relative_Burn_Ratio';
-        break;
-      case 'Severity': {
-        const dNBR = pre.subtract(post);
-        image = dNBR
-          .where(dNBR.lte(0.1), 1)
-          .where(dNBR.gt(0.1).and(dNBR.lte(0.27)), 2)
-          .where(dNBR.gt(0.27).and(dNBR.lte(0.44)), 3)
-          .where(dNBR.gt(0.44).and(dNBR.lte(0.66)), 4)
-          .where(dNBR.gt(0.66), 5)
-          .rename('Severity')
-          .toInt16();
-        description = 'Burn_Severity_Classes';
-        break;
-      }
-      default:
-        return new Response('Invalid map type', { status: 400 });
+    const pre  = makeNbr(preCol);
+    const post = makeNbr(postCol);
+    const dNBR = pre.subtract(post);
+
+    // classes de severidade 1–5
+    const image = dNBR
+      .where(dNBR.lte(0.1), 1)
+      .where(dNBR.gt(0.1).and(dNBR.lte(0.27)), 2)
+      .where(dNBR.gt(0.27).and(dNBR.lte(0.44)), 3)
+      .where(dNBR.gt(0.44).and(dNBR.lte(0.66)), 4)
+      .where(dNBR.gt(0.66), 5)
+      .rename('Severity')
+      .toInt16();
+
+    // pede um GeoTIFF bruto
+    const downloadUrl = await image.getDownloadURL({
+      name:        `Severity_${timestamp()}`,
+      scale:       satCfg.scale,
+      region,      // bbox de 5 pares
+      format:      'GEO_TIFF',
+      filePerBand: false
+    });
+
+    const upstream = await fetch(downloadUrl);
+    if (!upstream.ok) {
+      console.error('Earth Engine error:', await upstream.text());
+      return new Response('Earth Engine error', { status: 502 });
     }
 
-    const downloadUrl = image
-      .clip(geom)
-      .getDownloadURL({
-        name: `SeverusPT_${satellite.replace(/\//g, '_')}_${description}_${timestamp()}`,
-        scale: cfg.scale,
-        region: geom,
-        format: 'GEO_TIFF',
-        filePerBand: false
-      });
+    // força extensão .tif
+    const headers = new Headers(upstream.headers);
+    headers.set(
+      'Content-Disposition',
+      `attachment; filename="severity_${timestamp()}.tif"`
+    );
+    headers.set('Content-Type', 'image/tiff');
 
-    return Response.redirect(downloadUrl);
+    // faz streaming direto do TIFF cru
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers
+    });
+
   } catch (err) {
-    console.error('Error generating download:', err);
+    console.error('Download handler error:', err);
     return new Response('Server error', { status: 500 });
   }
 };
 
-/* ------------------------------------------------------------------ */
-/* Helpers                                                            */
+// timestamp helper fora do handler
 const timestamp = () => {
   const d = new Date();
-  return d
-    .toISOString()                       // 2025-06-23T14:05:12.345Z
-    .replace(/[-T:Z.]/g, '')            // 20250623 140512345
-    .slice(0, 15);                      // 20250623_140512
+  return d.toISOString().replace(/[-T:Z.]/g, '').slice(0, 15);
 };
-/* ------------------------------------------------------------------ */
