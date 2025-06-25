@@ -26,12 +26,18 @@
   onMount(async () => {
     if (!browser) return;
 
-    const L = await import("leaflet");
+    // 1) Carregar Leaflet como ESM e expô-lo no global
+    const L = (await import("leaflet")).default;
+    (window as any).L = L;
+
+    // 2) CSS primeiro
     await import("leaflet/dist/leaflet.css");
-    await import("leaflet-draw");
     await import("leaflet-draw/dist/leaflet.draw.css");
 
-    /* MAPA BASE */
+    // 3) Plugin já fixo na 1.0.2
+    await import("leaflet-draw");
+
+    /* ---- resto do teu código exatamente como estava ---- */
     map = L.map("map").setView([39.5, -8], 7);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "© OpenStreetMap contributors",
@@ -172,6 +178,10 @@
     if (!map) return;
 
     const L = await import("leaflet");
+    (window as any).L = L;
+    await import("leaflet-draw"); // agora o plugin encontra window.L
+    await import("leaflet-draw/dist/leaflet.draw.css");
+
     if (geoJsonLayers[id]) map.removeLayer(geoJsonLayers[id]);
 
     const layer = L.geoJSON(geojson, {
