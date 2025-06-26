@@ -33,7 +33,7 @@ export const POST: RequestHandler = async ({ request }) => {
       geometry,
       preStart, preEnd,
       postStart, postEnd,
-
+      cloudCoverMax,
       /*––– parâmetros opcionais –––*/
       applySegmentation = false,
       segmKernel,
@@ -50,6 +50,7 @@ export const POST: RequestHandler = async ({ request }) => {
       geometry,
       preStart, preEnd,
       postStart, postEnd,
+      cloudCoverMax,  
       applySegmentation,
       segmKernel, segmDnbrThresh, segmCvaThresh, segmMinPix
     });

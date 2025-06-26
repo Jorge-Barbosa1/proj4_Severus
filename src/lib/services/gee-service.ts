@@ -74,10 +74,7 @@ const SAT_CONF: Record<string, SatConf> = {
   Landsat9: {
     ic: 'LANDSAT/LC09/C02/T1_L2',
     scale: 30,
-    bands: {
-      NDVI: ['SR_B5', 'SR_B4'],   //  NIR ,  RED
-      NBR: ['SR_B5', 'SR_B7']    //  NIR ,  SWIR-2
-    },
+    bands: { NDVI: ['SR_B5', 'SR_B4'], NBR: ['SR_B5', 'SR_B7'] },
     mask: landsatMask,
     rescale: landsatScale
   },
@@ -99,7 +96,9 @@ const SAT_CONF: Record<string, SatConf> = {
     ic: 'MODIS/061/MOD09A1',
     scale: 500,
     bands: { NDVI: ['sur_refl_b02', 'sur_refl_b01'], NBR: ['sur_refl_b02', 'sur_refl_b07'] },
-    rescale: (img) => img.multiply(0.0001)
+    mask: modisMask,
+    rescale: (img: any) => img.addBands(
+      img.select('sur_refl_.*').multiply(0.0001), null, true)
   }
 };
 
@@ -110,7 +109,20 @@ function landsatMask(img: any) {
   return img.updateMask(qa.bitwiseAnd(cloud).eq(0).and(qa.bitwiseAnd(shadow).eq(0)));
 }
 function landsatScale(img: any) {
-  return img.multiply(0.0000275).add(-0.2);
+  const optical = img.select('SR_B.*');         // bandas ópticas (SR_B1, SR_B2, ...)
+  const scaled = optical.multiply(0.0000275).add(-0.2);
+  return img.addBands(scaled, null, true);
+}
+
+//Funçoes auxiliares para MODIS
+function modisMask(img: any) {
+   const qa = img.select('StateQA');    
+
+  /* bits 10 = cloud, 15 = cloud shadow (iguais em v061) */
+  const cloud  = qa.bitwiseAnd(1 << 10).eq(0);
+  const shadow = qa.bitwiseAnd(1 << 15).eq(0);
+
+  return img.updateMask(cloud.and(shadow));
 }
 
 /* ------------------------------------------------------------------ *
@@ -136,9 +148,49 @@ function evaluate<T>(obj: any): Promise<T> {
   return new Promise((ok, err) => obj.evaluate((v: T, e: any) => e ? err(e) : ok(v)));
 }
 
+function cloudFilter(col: any, sat: string, max: number) {
+  if (max == null) return col;
+  switch (sat) {
+    case 'Sentinel2': return col.filter(ee.Filter.lte('CLOUDY_PIXEL_PERCENTAGE', max));
+    case 'Landsat5': case 'Landsat7': case 'Landsat8': case 'Landsat9':
+      return col.filter(ee.Filter.lte('CLOUD_COVER_LAND', max));
+    case 'HLS': return col.filter(ee.Filter.lte('CLOUD_COVERAGE', max));
+    default: return col;
+  }
+}
+
 /* ------------------------------------------------------------------ *
  * 4. COLECÇÃO + CÁLCULO DE ÍNDICE
  * ------------------------------------------------------------------ */
+function buildCollection(
+  ee: any,
+  sat: string,
+  index: 'NDVI' | 'NBR',
+  geom: any,
+  cloudMax?: number
+) {
+  // 1 — colecção bruta
+  let col = ee.ImageCollection(SAT_CONF[sat].ic).filterBounds(geom);
+
+  // 2 — filtro de nebulosidade (se pedido)
+  if (cloudMax != null)
+    col = cloudFilter(col, sat, cloudMax);
+
+  // 3 — calcula o índice mantendo só o time_start
+  const cfg = SAT_CONF[sat];
+  return col
+    .map((i: any) => {
+      if (cfg.mask) i = cfg.mask(i);
+      if (cfg.rescale) i = cfg.rescale(i);
+      const [nir, redSwir] = cfg.bands[index];
+      const idx = i.normalizedDifference([nir, redSwir]).rename(index);
+      return idx.copyProperties(i, ['system:time_start']);
+    })
+    .select(index);
+}
+
+
+
 function getImageCollection(ee: any, sat: string, index: 'NDVI' | 'NBR') {
   const cfg = SAT_CONF[sat];
   if (!cfg) throw new Error(`Satellite ${sat} not supported`);
@@ -229,6 +281,8 @@ export async function generateSeverityMaps(args: {
   postStart: string;
   postEnd: string;
 
+  cloudCoverMax?: number;
+
   applySegmentation?: boolean;
 
   /*— parâmetros de segmentação (todos opcionais) */
@@ -238,15 +292,14 @@ export async function generateSeverityMaps(args: {
   segmMinPix?: number;
 }) {
 
-  const ee   = await getEE();
-  const sat  = normalizeSatelliteLabel(args.satellite);
+  const ee = await getEE();
+  const sat = normalizeSatelliteLabel(args.satellite);
   const geom = ee.Geometry(args.geometry);
 
-  const col = getImageCollection(ee, sat, 'NBR')
-               .filterBounds(geom)
-               .filterDate(args.preStart, args.postEnd);
-
-  const preCol  = col.filterDate(args.preStart,  args.preEnd);
+  const col = buildCollection(
+    ee, sat, 'NBR', geom, args.cloudCoverMax
+  );
+  const preCol = col.filterDate(args.preStart, args.preEnd);
   const postCol = col.filterDate(args.postStart, args.postEnd);
 
   /* ───── Avaliar tamanho das colecções ───── */
@@ -266,20 +319,20 @@ export async function generateSeverityMaps(args: {
     );
 
   /* ---------- resto do algoritmo mantém-se ---------- */
-  const pre  = preCol .median();
+  const pre = preCol.median();
   const post = postCol.median();
   const dNBR = pre.subtract(post).rename('dNBR').clip(geom);
   const rdNBR = dNBR.divide(pre.sqrt()).rename('rdNBR').clip(geom);
-  const rbr   = dNBR.divide(pre.add(1.001)).rename('rbr').clip(geom);
+  const rbr = dNBR.divide(pre.add(1.001)).rename('rbr').clip(geom);
   const classified = dNBR
-      .where(dNBR.lte(0.1), 1)
-      .where(dNBR.gt(0.1).and(dNBR.lte(0.27)), 2)
-      .where(dNBR.gt(0.27).and(dNBR.lte(0.44)), 3)
-      .where(dNBR.gt(0.44).and(dNBR.lte(0.66)), 4)
-      .where(dNBR.gt(0.66), 5)
-      .clip(geom)
-      .rename('severity')
-      .toInt16();
+    .where(dNBR.lte(0.1), 1)
+    .where(dNBR.gt(0.1).and(dNBR.lte(0.27)), 2)
+    .where(dNBR.gt(0.27).and(dNBR.lte(0.44)), 3)
+    .where(dNBR.gt(0.44).and(dNBR.lte(0.66)), 4)
+    .where(dNBR.gt(0.66), 5)
+    .clip(geom)
+    .rename('severity')
+    .toInt16();
 
   return { deltaNBR: dNBR, rdNBR, rbr, classified };
 }

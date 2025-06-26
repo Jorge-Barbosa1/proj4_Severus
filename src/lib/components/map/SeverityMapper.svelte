@@ -42,6 +42,7 @@
         body:JSON.stringify({
           satellite,
           geometry,
+          cloudCoverMax,
           preStart, preEnd, postStart, postEnd,
           applySegmentation,
           segmKernel, segmDnbrThresh, segmCvaThresh, segmMinPix
