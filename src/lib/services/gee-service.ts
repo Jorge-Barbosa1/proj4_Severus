@@ -38,7 +38,7 @@ type SatConf = {
 
 };
 
-const SAT_CONF: Record<string, SatConf> = {
+export const SAT_CONF: Record<string, SatConf> = {
   Sentinel2: {
     ic: 'COPERNICUS/S2_SR_HARMONIZED',
     scale: 20,

@@ -1,7 +1,7 @@
 // this file is used to initialize the Google Earth Engine API
 // and authenticate using a service account. It exports a function `getEE`
 import ee from '@google/earthengine';
-import privateKey from '$lib/config/severus-457615-9206f875b449.json';
+import privateKey from '$lib/config/severus-457615-83acf40ce029.json';
 
 let cachedEE: any = null;
 

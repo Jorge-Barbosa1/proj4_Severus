@@ -36,7 +36,7 @@ const SAT_CFG: Record<string, SatCfg> = {
     scaler: img => img.multiply(0.0000275).add(-0.2)
   },
   'Landsat-9/OLI': {
-    collection: 'LANDSAT/LC09/C02/T1_TOA',
+    collection: 'LANDSAT/LC09/C02/T1_L2',
     bands: ['B5', 'B7'],
     scale: 30,
     scaler: img => img.multiply(0.0000275)

@@ -2,7 +2,7 @@
   import { onMount, createEventDispatcher } from 'svelte';
   import TimeSeriesChart from '$lib/components/charts/Chart.svelte';
   import SeverityChart from '$lib/components/charts/SeverityChart.svelte';
-  import { browser } from '$app/environment';
+  import { normalizeSatelliteLabel } from '$lib/services/gee-service';
 
   export let geometry: any = null;
   export let fireDate: string = '';
@@ -18,17 +18,6 @@
 
   const dispatch = createEventDispatcher();
 
-  function getSatelliteKey(label: string): string {
-    const map = {
-      'MODIS': 'MODIS/061/MOD09A1',
-      'Landsat-5': 'LANDSAT/LT05/C02/T1_L2',
-      'Landsat-7': 'LANDSAT/LE07/C02/T1_L2',
-      'Landsat-8': 'LANDSAT/LC08/C02/T1_L2',
-      'Sentinel-2': 'COPERNICUS/S2_SR_HARMONIZED'
-    };
-    return map[label] ?? label;
-  }
-
   async function plotTimeSeries() {
     if (!geometry || !satellite || !index || !startDate || !endDate) {
       alert('Faltam parâmetros para gerar a série temporal.');
@@ -41,7 +30,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          satellite: getSatelliteKey(satellite),
+          satellite: normalizeSatelliteLabel(satellite),
           index,
           startDate,
           endDate,
@@ -79,7 +68,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          satellite: getSatelliteKey(satellite),
+          satellite: normalizeSatelliteLabel(satellite),
           index,
           fireDate,
           windowSize: analysisRangeDays,
