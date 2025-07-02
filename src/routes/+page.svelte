@@ -795,7 +795,9 @@
           <h2>Mapa</h2>
           <div class="card-actions">
             <span class="map-tip tooltip">
-              <InfoDialog docPath={helpDocPath} />
+              {#key mode}
+                <InfoDialog docPath={helpDocPath} />
+              {/key}
               <span class="tooltip-text">
                 Clique para abrir o tutorial completo
               </span>
