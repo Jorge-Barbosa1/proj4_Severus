@@ -12,6 +12,7 @@
   const geoJsonLayers: Record<string, any> = {};
   const tileLayers: Record<string, any> = {};
   let imageLayer: any = null;
+  let legendControl: any = null;
 
   /* ────── HELPERS ────── */
   function clearDrawings() {
@@ -23,6 +24,48 @@
     const geom = layer.toGeoJSON().geometry;
     document.dispatchEvent(new CustomEvent("geometryDrawn", { detail: geom }));
   }
+
+  function addSeverityLegend() {
+  const L = (window as any).L;
+  if (legendControl) map.removeControl(legendControl);
+
+  legendControl = L.control({ position: 'bottomleft' });  // ou 'bottomleft'
+  legendControl.onAdd = () => {
+    const div = L.DomUtil.create('div', 'info legend severity-legend');
+
+    // 1) Título + classes discretas
+    const classes = [
+      { name: 'Unburnt/Very-low', color: '#0000FF' },
+      { name: 'Low',            color: '#FFFF00' },
+      { name: 'Moderate',       color: '#FFA500' },
+      { name: 'High',           color: '#FF0000' },
+      { name: 'Very-high',      color: '#800000' }
+    ];
+    div.innerHTML += '<strong>Burn severity classes</strong><br>';
+    classes.forEach(c => {
+      div.innerHTML +=
+        `<i style="
+           background:${c.color};
+           width:18px; height:18px;
+           display:inline-block;
+           margin-right:6px;
+           border:1px solid #999;
+         "></i> ${c.name}<br>`;
+    });
+
+    // 2) Espaço antes do gradiente
+    div.innerHTML += '<br><strong>Burn severity level</strong><br>';
+
+    // 3) Barra de gradiente
+    div.innerHTML +=
+      `<div class="gradient-bar"></div>
+       <div class="gradient-label top">Very-high severity</div>
+       <div class="gradient-label bottom">Unburned/Very-low severity</div>`;
+
+    return div;
+  };
+  legendControl.addTo(map);
+}
 
   /* ────── LIFECYCLE ────── */
   onMount(async () => {
@@ -43,6 +86,7 @@
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "© OpenStreetMap contributors",
     }).addTo(map);
+    
 
     /* 3. flag de desenho */
     map.on(L.Draw.Event.DRAWSTART, () => drawing = true);
@@ -310,7 +354,13 @@
   export async function addTileLayer(id: string, url: string, opts = {}) {
     const L = await import("leaflet");
     if (tileLayers[id]) removeTileLayer(id);
-    tileLayers[id] = L.tileLayer(url, opts).addTo(map);
+   // adiciona o tile
+   tileLayers[id] = L.tileLayer(url, opts).addTo(map);
+
+   // se for camada de severidade, dispara a criação da legenda
+   if (id.startsWith("severity-")) {
+     addSeverityLegend();
+   }
   }
 
   export function removeTileLayer(id: string) {
@@ -333,6 +383,7 @@
     const L = await import("leaflet");
     if (imageLayer) map.removeLayer(imageLayer);
     imageLayer = L.tileLayer(tileUrl, { opacity: 0.7 }).addTo(map);
+    addSeverityLegend();
   }
 
   export function getSelectedGeometry() {
@@ -399,4 +450,60 @@
   :global(.leaflet-popup-content button:hover) {
     background: #e66700 !important;
   }
+
+:global(.info.legend) {
+  background: white;
+  padding: 6px 8px;
+  box-shadow: 0 0 15px rgba(0,0,0,0.2);
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 18px;
+  color: #555;
+  z-index: 2000;  /* garante que fique acima do próprio mapa */
+}
+
+:global(.info.legend i) {
+  border: 1px solid #999;
+}
+
+:global(.info.legend.severity-legend) {
+  padding: 8px;
+  background: white;
+  line-height: 1.4;
+  color: #555;
+  font-size: 12px;
+  box-shadow: 0 0 15px rgba(0,0,0,0.2);
+  border-radius: 5px;
+  z-index: 2000;
+}
+
+:global(.info.legend.severity-legend .gradient-bar) {
+  width: 20px;
+  height: 100px;
+  margin: 6px auto 0 auto;
+  background: linear-gradient(
+    to bottom,
+    #800000, /* very-high */
+    #FF0000,
+    #FFA500,
+    #FFFF00,
+    #0000FF  /* very-low */
+  );
+  border: 1px solid #999;
+}
+
+:global(.info.legend.severity-legend .gradient-label) {
+  text-align: center;
+  font-size: 11px;
+  margin: 2px 0;
+}
+
+:global(.info.legend.severity-legend .gradient-label.top) {
+  margin-top: 4px;
+}
+
+:global(.info.legend.severity-legend .gradient-label.bottom) {
+  margin-bottom: 4px;
+}
+
 </style>
