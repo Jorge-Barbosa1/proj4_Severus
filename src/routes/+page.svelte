@@ -913,39 +913,35 @@
             </div>
           {/if}
 
-          {#if imgLists.length}
-            <div class="card image-list-card">
-              <div class="card-header">
-                <h2>Listas de Imagens Satélite</h2>
+          {#each imgLists as list (list.id)}
+            <details class="img-list">
+              <summary>
+                <span class="map-tag">Mapa #1</span>
+                <span class="count-badge">6</span>
+                IDs utilizados
+              </summary>
+
+              <div class="id-columns">
+                <div>
+                  <h4>Pré-fogo (4)</h4>
+                  <ul>
+                    {#each list.pre as id, i}
+                      <li>[{i + 1}]&nbsp;{id}</li>
+                    {/each}
+                  </ul>
+                </div>
+
+                <div>
+                  <h4>Pós-fogo (2)</h4>
+                  <ul>
+                    {#each list.post as id, i}
+                      <li>[{i + 1}]&nbsp;{id}</li>
+                    {/each}
+                  </ul>
+                </div>
               </div>
-
-              <div class="card-body">
-                {#each imgLists as list (list.id)}
-                  <details class="img-list-details">
-                    <summary>[Map #{list.id}] IDs utilizados</summary>
-
-                    <div class="img-sublist">
-                      <h4>Pré-fogo</h4>
-                      <ol>
-                        {#each list.pre as id, i}
-                          <li>[{i + 1}] {id}</li>
-                        {/each}
-                      </ol>
-                    </div>
-
-                    <div class="img-sublist">
-                      <h4>Pós-fogo</h4>
-                      <ol>
-                        {#each list.post as id, i}
-                          <li>[{i + 1}] {id}</li>
-                        {/each}
-                      </ol>
-                    </div>
-                  </details>
-                {/each}
-              </div>
-            </div>
-          {/if}
+            </details>
+          {/each}
         </div>
       </div>
     </section>
@@ -1783,39 +1779,74 @@
     animation: dash 1.5s ease-in-out infinite;
   }
 
-  .image-list-card {
-    margin-top: 1rem;
-  }
+  /* —————  LISTAGEM DE IDS  ————— */
 
-  /* reaproveita já as vars do tema */
-  .img-list-details {
-    margin-bottom: 0.75rem;
+  .img-list {
     border: 1px solid var(--border-color);
     border-radius: var(--border-radius-sm);
     background: var(--bg-secondary);
-    padding: 0.5rem 0.75rem;
+    margin: 1rem 0;
+    padding: 0.75rem 1rem;
   }
 
-  .img-list-details summary {
+  .img-list summary {
     cursor: pointer;
     font-weight: 600;
-    list-style: none; /* remove triângulo default */
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    list-style: none; /* esconde triângulo default */
+    color: var(--text-primary);
   }
 
-  .img-sublist {
-    margin: 0.5rem 0 0.75rem 0;
+  /* pequenos “pills” para mapa # e contador */
+  .map-tag,
+  .count-badge {
+    font-size: 0.75rem;
+    line-height: 1;
+    padding: 0.15rem 0.45rem;
+    border: 1px solid var(--text-primary);
+    border-radius: 8px;
   }
 
-  .img-sublist h4 {
+  .map-tag {
+    font-weight: 700;
+  }
+  .count-badge {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* colunas */
+  .id-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 1.25rem;
+    margin-top: 0.9rem;
+  }
+
+  /* subtítulos */
+  .id-columns h4 {
     font-size: 0.9rem;
-    margin-bottom: 0.25rem;
-    color: var(--accent-dark);
+    margin: 0 0 0.35rem;
+    font-weight: 600;
+    color: var(--text-primary);
   }
 
-  .img-sublist ol {
-    font-size: 0.8rem;
-    padding-left: 1.25rem;
-    line-height: 1.3;
+  /* listagem (monospace só aqui) */
+  .id-columns ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 185px; /* scroll quando crescer */
+    overflow-y: auto;
+    font-family: ui-monospace, "SFMono-Regular", monospace;
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+
+  /* zebra ultra-suave */
+  .id-columns li:nth-child(odd) {
+    background: rgba(0, 0, 0, 0.035);
   }
 
   @keyframes rotate {
