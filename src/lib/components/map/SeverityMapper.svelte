@@ -8,9 +8,9 @@
   export let preEnd = '';
   export let postStart = '';
   export let postEnd = '';
-  export let applySegmentation = false;
 
   /* -------- parâmetros avançados -------- */
+  export let applySegmentation = false;
   export let segmKernel = 3;
   export let segmDnbrThresh = 0.1;
   export let segmCvaThresh = 0.05;
@@ -18,59 +18,88 @@
   export let cloudCoverMax = 20;
 
   /* -------- estado local -------- */
-  let error = '';
-  let generated = false;
+  let error    = '';
+  let loading  = false;
+  let finished = false;
 
   const dispatch = createEventDispatcher();
+  
+  /** Verifica rapidamente se falta algum parâmetro essencial */
+  function missingRequired(): string | null {
+    if (!geometry) return 'Desenhe/seleccione uma área no mapa.';
+    if (!satellite) return 'Escolha o satélite / sensor.';
+    if (!preStart || !preEnd || !postStart || !postEnd)
+      return 'Defina as datas pré- e pós-fogo.';
+    return null;
+  }
 
   async function generateSeverityMap() {
-    error = '';
-    generated = false;
+    error   = '';
+    loading = true;
+    finished = false;
 
-    if (
-      !geometry || !satellite ||
-      !preStart || !preEnd || !postStart || !postEnd
-    ) {
-      error = 'Faltam parâmetros necessários para gerar o mapa.';
-      return;
-    }
+    const msg = missingRequired();
+    if (msg) { error = msg; loading = false; return; }
+
+    /* ---------- constrói o payload que é partilhado por ambas as rotas ---------- */
+    const payload = {
+      satellite,
+      geometry,
+      cloudCoverMax,
+      preStart, preEnd, postStart, postEnd,
+      applySegmentation,
+      segmKernel, segmDnbrThresh, segmCvaThresh, segmMinPix
+    };
 
     try {
-       const res = await fetch('/api/gee/severity-maps', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          satellite,
-          geometry,
-          cloudCoverMax,
-          preStart, preEnd, postStart, postEnd,
-          applySegmentation,
-          segmKernel, segmDnbrThresh, segmCvaThresh, segmMinPix
+      /* corremos ambas as chamadas em paralelo */
+      const [mapRes, idsRes] = await Promise.all([
+        fetch('/api/gee/severity-maps', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        }),
+        fetch('/api/gee/image-list', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
         })
-      });
+      ]);
 
-      if (!res.ok) throw new Error(await res.text());
+      if (!mapRes.ok)  throw new Error(await mapRes.text());
+      if (!idsRes.ok)  throw new Error(await idsRes.text());
 
-      const { maps, meta } = await res.json();
+      const { maps, meta }            = await mapRes.json();
+      const { preImageIds, postImageIds } = await idsRes.json();
 
-      if (!maps || maps.length === 0 || maps.some((m: any) => !m.tileUrl)) {
-        error = 'A API não devolveu os tiles esperados.';
-        return;
+      if (!maps?.length || maps.some((m:any)=>!m.tileUrl)) {
+        throw new Error('A API não devolveu os tiles esperados.');
       }
 
-      /* dispara eventos para o componente-pai */
-      dispatch('mapsGenerated', { maps });
-      if (meta) dispatch('imageListGenerated', meta);
+      /* ----  despacha eventos para o componente-pai  ---- */
+      dispatch('mapsGenerated',   { maps });
+      dispatch('imageListGenerated', { preImageIds, postImageIds });
+      if (meta) dispatch('extraMeta', meta);   // se quiseres continuar a usar
 
-      generated = true;
-    } catch (e: any) {
+      finished = true;
+    } catch (e:any) {
       console.error(e);
-      error = 'Erro ao gerar o mapa de severidade.';
+      error = e.message || 'Erro ao gerar o mapa de severidade.';
+    } finally {
+      loading = false;
     }
   }
 </script>
 
 <div class="severity-mapper">
+
+
+{#if loading}
+    <p>A processar… ⏳</p>
+  {/if}
+
+  {#if finished}
+    <p class="success">✅ Mapas gerados com sucesso</p>
+  {/if}
+
   {#if !geometry}
     <div class="info-message">
       <p>Selecione uma área queimada no mapa para gerar o mapa de severidade.</p>
@@ -84,13 +113,6 @@
     </div>
   {/if}
 
-  {#if error}
-    <p class="error">{error}</p>
-  {/if}
-
-  {#if generated}
-    <p class="success">Mapas gerados com sucesso</p>
-  {/if}
 </div>
 
 <style>

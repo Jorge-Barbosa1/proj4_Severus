@@ -166,6 +166,11 @@
   let generatedMaps = [];
   let mapComponentDebug = null;
 
+  // Variável para armazenar a data do incêndio
+  type ImgList = { id: number; pre: string[]; post: string[] };
+  let imgLists: ImgList[] = [];
+  let nextListId = 1; /* contador simples para Map # */
+
   // Tipos de camadas para severidade
   type SeverityLayer = { id: string; name: string; visible: boolean };
   let severityLayers: SeverityLayer[] = [];
@@ -372,6 +377,10 @@
 
   function handleImageListGenerated(e: CustomEvent) {
     const { preImageIds, postImageIds } = e.detail;
+    imgLists = [
+      ...imgLists,
+      { id: nextListId++, pre: preImageIds, post: postImageIds },
+    ];
     console.log("Pré-fogo:", preImageIds, "Pós-fogo:", postImageIds);
   }
 
@@ -901,6 +910,40 @@
           {#if mapComponentDebug}
             <div class="debug-info">
               <p>Map component type: {mapComponentDebug}</p>
+            </div>
+          {/if}
+
+          {#if imgLists.length}
+            <div class="card image-list-card">
+              <div class="card-header">
+                <h2>Listas de Imagens Satélite</h2>
+              </div>
+
+              <div class="card-body">
+                {#each imgLists as list (list.id)}
+                  <details class="img-list-details">
+                    <summary>[Map #{list.id}] IDs utilizados</summary>
+
+                    <div class="img-sublist">
+                      <h4>Pré-fogo</h4>
+                      <ol>
+                        {#each list.pre as id, i}
+                          <li>[{i + 1}] {id}</li>
+                        {/each}
+                      </ol>
+                    </div>
+
+                    <div class="img-sublist">
+                      <h4>Pós-fogo</h4>
+                      <ol>
+                        {#each list.post as id, i}
+                          <li>[{i + 1}] {id}</li>
+                        {/each}
+                      </ol>
+                    </div>
+                  </details>
+                {/each}
+              </div>
             </div>
           {/if}
         </div>
@@ -1738,6 +1781,41 @@
     stroke-dashoffset: 75;
     transform-origin: center;
     animation: dash 1.5s ease-in-out infinite;
+  }
+
+  .image-list-card {
+    margin-top: 1rem;
+  }
+
+  /* reaproveita já as vars do tema */
+  .img-list-details {
+    margin-bottom: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    background: var(--bg-secondary);
+    padding: 0.5rem 0.75rem;
+  }
+
+  .img-list-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    list-style: none; /* remove triângulo default */
+  }
+
+  .img-sublist {
+    margin: 0.5rem 0 0.75rem 0;
+  }
+
+  .img-sublist h4 {
+    font-size: 0.9rem;
+    margin-bottom: 0.25rem;
+    color: var(--accent-dark);
+  }
+
+  .img-sublist ol {
+    font-size: 0.8rem;
+    padding-left: 1.25rem;
+    line-height: 1.3;
   }
 
   @keyframes rotate {
