@@ -11,23 +11,30 @@
   import SeverityMapper from "$lib/components/map/SeverityMapper.svelte";
   import FireAnalyst from "$lib/components/analyst/FireAnalyst.svelte";
   import ChatWidget from "$lib/components/ChatBot/ChatWidget.svelte";
+  import InfoDialog from "$lib/components/tutorials/InfoDialog.svelte";
 
-  function bboxFromGeoJSON(geojson: any): [number,number][][] {
-    const ring = geojson.coordinates[0] as [number,number][];
-    const lons = ring.map(p => p[0]);
-    const lats = ring.map(p => p[1]);
+  function bboxFromGeoJSON(geojson: any): [number, number][][] {
+    const ring = geojson.coordinates[0] as [number, number][];
+    const lons = ring.map((p) => p[0]);
+    const lats = ring.map((p) => p[1]);
     const minLon = Math.min(...lons),
-          maxLon = Math.max(...lons),
-          minLat = Math.min(...lats),
-          maxLat = Math.max(...lats);
+      maxLon = Math.max(...lons),
+      minLat = Math.min(...lats),
+      maxLat = Math.max(...lats);
     return [
       [minLon, minLat],
       [minLon, maxLat],
       [maxLon, maxLat],
       [maxLon, minLat],
-      [minLon, minLat]
+      [minLon, minLat],
     ];
   }
+
+  // Caminho para os Tutoriais
+  $: helpDocPath =
+    mode === "mapper"
+      ? "/tutorials/mapper_tutorial.txt"
+      : "/tutorials/analyst_tutorial.txt";
 
   // Estado da tab com persistência
   let mode: "mapper" | "analyst" = "mapper";
@@ -322,7 +329,7 @@
     }
   }
 
-  function toggleSeverity(layer: SeverityLayer, visible: boolean){
+  function toggleSeverity(layer: SeverityLayer, visible: boolean) {
     layer.visible = visible;
     visible
       ? mapComponent.showTileLayer(layer.id)
@@ -375,57 +382,56 @@
   function toggleAdvancedOptions() {
     showAdvancedOptions = !showAdvancedOptions;
   }
- async function downloadGeoTIFF() {
-  if (!selectedSatellite || !selectedGeometry) return;
+  async function downloadGeoTIFF() {
+    if (!selectedSatellite || !selectedGeometry) return;
 
-  // calcula só a bounding box de 5 pontos
-  const region = bboxFromGeoJSON(selectedGeometry);
+    // calcula só a bounding box de 5 pontos
+    const region = bboxFromGeoJSON(selectedGeometry);
 
-  const payload = {
-    type:      'Severity',
-    satellite: selectedSatellite,
-    preStart:  preFireStart,
-    preEnd:    preFireEnd,
-    postStart: postFireStart,
-    postEnd:   postFireEnd,
-    region     // só o array de 5 coordenadas
-  };
+    const payload = {
+      type: "Severity",
+      satellite: selectedSatellite,
+      preStart: preFireStart,
+      preEnd: preFireEnd,
+      postStart: postFireStart,
+      postEnd: postFireEnd,
+      region, // só o array de 5 coordenadas
+    };
 
-  const res = await fetch('/api/gee/download', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify(payload)
-  });
+    const res = await fetch("/api/gee/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
 
-  if (!res.ok) {
-    console.error('Download failed:', await res.text());
-    return;
+    if (!res.ok) {
+      console.error("Download failed:", await res.text());
+      return;
+    }
+
+    // tenta extrair o filename dos headers
+    const cd = res.headers.get("Content-Disposition") || "";
+    let filename = "";
+    const match = cd.match(/filename="(.+)"/);
+    if (match) {
+      filename = match[1];
+    } else {
+      // fallback: usa content-type para decidir a extensão
+      const ct = res.headers.get("Content-Type") || "";
+      const ext = ct.includes("tiff") ? ".tif" : ".zip";
+      filename = `severity_${Date.now()}${ext}`;
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
-
-  // tenta extrair o filename dos headers
-  const cd = res.headers.get('Content-Disposition') || '';
-  let filename = '';
-  const match = cd.match(/filename="(.+)"/);
-  if (match) {
-    filename = match[1];
-  } else {
-    // fallback: usa content-type para decidir a extensão
-    const ct = res.headers.get('Content-Type') || '';
-    const ext = ct.includes('tiff') ? '.tif' : '.zip';
-    filename = `severity_${Date.now()}${ext}`;
-  }
-
-  const blob = await res.blob();
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
 </script>
 
 <div
@@ -789,10 +795,9 @@
           <h2>Mapa</h2>
           <div class="card-actions">
             <span class="map-tip tooltip">
-              <span class="tooltip-icon">ℹ️</span>
+              <InfoDialog docPath={helpDocPath} />
               <span class="tooltip-text">
-                Clique no mapa para selecionar uma área queimada ou desenhe uma
-                área de interesse
+                Clique para abrir o tutorial completo
               </span>
             </span>
           </div>
@@ -850,54 +855,53 @@
         </div>
 
         <div class="card-body analysis-container">
-  {#if mode === "mapper"}
-    <SeverityMapper
-      geometry={selectedGeometry}
-      satellite={selectedSatellite}
-      preStart={preFireStart}
-      preEnd={preFireEnd}
-      postStart={postFireStart}
-      postEnd={postFireEnd}
-      {applySegmentation}
-      {segmKernel}
-      {segmDnbrThresh}
-      {segmCvaThresh}
-      {segmMinPix}
-      {cloudCoverMax}
-      on:mapsGenerated={handleMapsGenerated}
-      on:imageListGenerated={handleImageListGenerated}
-    />
+          {#if mode === "mapper"}
+            <SeverityMapper
+              geometry={selectedGeometry}
+              satellite={selectedSatellite}
+              preStart={preFireStart}
+              preEnd={preFireEnd}
+              postStart={postFireStart}
+              postEnd={postFireEnd}
+              {applySegmentation}
+              {segmKernel}
+              {segmDnbrThresh}
+              {segmCvaThresh}
+              {segmMinPix}
+              {cloudCoverMax}
+              on:mapsGenerated={handleMapsGenerated}
+              on:imageListGenerated={handleImageListGenerated}
+            />
 
-    {#if showSeverityMap}
-      <div class="download-row" style="margin-top:1rem">
-        <button
-          class="action-button"
-          on:click={downloadGeoTIFF}
-          disabled={!selectedSatellite || !selectedGeometry}
-        >
-          ↓ Download GeoTIFF
-        </button>
-      </div>
-    {/if}
+            {#if showSeverityMap}
+              <div class="download-row" style="margin-top:1rem">
+                <button
+                  class="action-button"
+                  on:click={downloadGeoTIFF}
+                  disabled={!selectedSatellite || !selectedGeometry}
+                >
+                  ↓ Download GeoTIFF
+                </button>
+              </div>
+            {/if}
+          {:else}
+            <FireAnalyst
+              geometry={selectedGeometry}
+              {fireDate}
+              satellite={selectedSatellite}
+              index={selectedIndex}
+              {startDate}
+              {endDate}
+              {analysisRangeDays}
+            />
+          {/if}
 
-  {:else}
-    <FireAnalyst
-      geometry={selectedGeometry}
-      {fireDate}
-      satellite={selectedSatellite}
-      index={selectedIndex}
-      {startDate}
-      {endDate}
-      {analysisRangeDays}
-    />
-  {/if}
-
-  {#if mapComponentDebug}
-    <div class="debug-info">
-      <p>Map component type: {mapComponentDebug}</p>
-    </div>
-  {/if}
-</div>
+          {#if mapComponentDebug}
+            <div class="debug-info">
+              <p>Map component type: {mapComponentDebug}</p>
+            </div>
+          {/if}
+        </div>
       </div>
     </section>
   </main>
@@ -933,7 +937,7 @@
     --gray-light: #adb5bd;
     --gray-lighter: #e9ecef;
     --btn-start: #ff8c00;
-    --btn-end:   #4caf50;
+    --btn-end: #4caf50;
     --light: #f8f9fa;
     --border-radius: 12px;
     --border-radius-sm: 8px;

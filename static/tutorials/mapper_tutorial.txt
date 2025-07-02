@@ -1,0 +1,64 @@
+SeverusPT – Burn Severity **Mapper** (Quick Guide)
+==============================================================
+
+This guide mirrors the original tutorial at <https://severus.pt/en/burn-severity-mapper/> but is adapted to the Svelte app layout.
+
+‣ **Purpose**
+
+Generate dNBR/rdNBR/rBR severity maps (and their classified version) for any area in mainland Portugal using multi‑temporal composites of satellite imagery (MODIS, Landsat 5/7/8/9, Sentinel‑2, or HLS).
+
+--------------------------------------------------------------------
+1  Select a Burned‑Area Layer
+--------------------------------------------------------------------
+1- Open **Panel 1 – “Áreas Queimadas”** on the left sidebar.  
+2- Choose a **dataset**  
+    • *ICNF burned areas* – polygons supplied by ICNF (2000‑2021)  
+    • *EFFIS burned areas* – polygons from EFFIS (2000‑2023)  
+3- Choose a **year** and press **“+ Adicionar camada”** to draw that year’s polygons on the map.  
+    Tip – Toggle layer visibility via the *Layers* popup on the map (button *Layers*).
+
+--------------------------------------------------------------------
+2  Define the Analysis Mode
+--------------------------------------------------------------------
+Open **Panel “Mapper – Severidade”**.
+
+● **Sensor** – pick one of the six sensors.  
+● **Date mode**
+   1. *Fire date ± days* – specify the fire date; choose days before/after.  
+   2. *4 specific dates* – explicitly type two pre‑fire and two post‑fire dates.  
+   3. *Compare with previous year* – set fire date; the same window one year earlier is used as “pre”.
+
+● **Cloud cover %** – filters images whose scene cloud coverage exceeds the threshold.
+
+► *Advanced options* (segmentation)  
+   – Kernel size, dNBR threshold, CVA threshold, Minimum pixels.
+
+--------------------------------------------------------------------
+3  Choose the Area of Interest (AOI)
+--------------------------------------------------------------------
+Use the **right‑hand toolbox**:
+
+□ *User‑defined shape* – draw rectangle / polygon / point.  
+□ *Specified lon/lat* – enter decimal degrees (optionally with buffer radius).  
+□ *Selected burned area* – click any polygon previously loaded from ICNF/EFFIS.
+
+--------------------------------------------------------------------
+4  Run the Mapper
+--------------------------------------------------------------------
+Press **“Gerar mapas”** (inside *SeverityMapper* component).  
+The app will:
+
+1. Build pre‑ and post‑fire composites with your settings.  
+2. Compute dNBR, rdNBR, rBR and a 5‑class severity map.  
+3. Add each product as a tile layer (check *Layers* popup).  
+4. Emit preview thumbnails below the map.
+
+► **Download GeoTIFF** – once maps are displayed, click **“↓ Download GeoTIFF”** to export the classified severity raster for the current AOI.
+
+--------------------------------------------------------------------
+5  Tips & Limits
+--------------------------------------------------------------------
+• Very large polygons or long time windows may trigger Earth‑Engine time‑outs.  
+• Sentinel‑2 data available from March 2017; Landsat 8 from March 2013; MODIS from Feb 2000.  
+• Use ≤ 50 % cloud‑cover for Landsat/Sentinel to avoid noisy composites.
+--------------------------------------------------------------------

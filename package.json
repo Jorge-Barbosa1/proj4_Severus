@@ -37,6 +37,7 @@
 		"leaflet": "^1.9.4",
 		"leaflet-draw": "^1.0.2",
 		"maplibre-gl": "^5.4.0",
+		"marked": "^16.0.0",
 		"openai": "^5.0.1",
 		"path": "^0.12.7",
 		"pdf-parse": "^1.1.1",
