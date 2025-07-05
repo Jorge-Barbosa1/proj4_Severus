@@ -8,7 +8,9 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
-		"start": "node server.js"
+		"start": "node server.js",
+		"create-embeddings": "tsx src/scripts/create-embeddings.ts"
+
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^4.0.0",
@@ -20,6 +22,8 @@
 		"@types/leaflet-draw": "^1.0.12",
 		"dotenv": "^16.5.0",
 		"svelte": "^5.0.0",
+		"tsx": "^4.20.3",
+		"typescript": "^5.8.3",
 		"vite": "^6.2.5"
 	},
 	"dependencies": {
