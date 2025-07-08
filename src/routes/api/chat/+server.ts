@@ -26,38 +26,40 @@ export const POST: RequestHandler = async ({ request }) => {
       );
     }
 
-    // 2. Busca RAG com timeout e fallback
+    // 2. Busca RAG melhorada com múltiplas tentativas
     let context = "";
     let ragStatus = "sem_contexto";
+    let searchResults: SearchResult[] = [];
     
     try {
-      // Timeout para operações RAG (máximo 8 segundos)
-      const ragPromise = performRAGSearch(lastUserMessage.content);
-      const timeoutPromise = new Promise<string>((_, reject) => 
-        setTimeout(() => reject(new Error('RAG timeout')), 12000) // 12 segundos para procura de contexto
+      const ragPromise = performEnhancedRAGSearch(lastUserMessage.content);
+      const timeoutPromise = new Promise<{context: string, results: SearchResult[]}>((_, reject) => 
+        setTimeout(() => reject(new Error('RAG timeout')), 10000)
       );
       
-      context = await Promise.race([ragPromise, timeoutPromise]);
+      const ragResult = await Promise.race([ragPromise, timeoutPromise]);
+      context = ragResult.context;
+      searchResults = ragResult.results;
       ragStatus = context ? "contexto_encontrado" : "sem_contexto";
       
     } catch (ragError) {
       console.error("Erro/Timeout RAG:", ragError);
       ragStatus = "erro_rag";
-      // Continua sem contexto em vez de falhar
     }
 
-    // 3. Construção do prompt otimizado
-    const systemMessage = buildSystemMessage(context, ragStatus);
-    const chatMessages = [systemMessage, ...messages];
+    // 3. Construção do prompt otimizado com melhor contexto
+    const systemMessage = buildEnhancedSystemMessage(context, ragStatus, searchResults);
+    const optimizedMessages = optimizeMessageHistory(messages, systemMessage);
 
-    // 4. Chamada ao modelo com retry e timeout
-    const reply = await generateAIResponseWithRetry(chatMessages);
+    // 4. Chamada ao modelo com parâmetros otimizados
+    const reply = await generateAIResponseWithRetry(optimizedMessages);
 
     // 5. Resposta formatada
     return new Response(
       JSON.stringify({ 
         reply,
         context: ragStatus,
+        sources: searchResults.map(r => r.document.metadata.title),
         timestamp: new Date().toISOString()
       }),
       { 
@@ -72,7 +74,6 @@ export const POST: RequestHandler = async ({ request }) => {
   } catch (error) {
     console.error("Erro no endpoint /api/chat:", error);
     
-    // Resposta de fallback sempre funcional
     const fallbackReply = "Desculpe, ocorreu um erro temporário. Por favor, tente novamente em alguns momentos.";
     
     return new Response(
@@ -82,27 +83,35 @@ export const POST: RequestHandler = async ({ request }) => {
         details: error instanceof Error ? error.message : "Erro desconhecido"
       }),
       { 
-        status: 200, // 200 em vez de 500 para evitar erro 502
+        status: 200,
         headers: { "Content-Type": "application/json" } 
       }
     );
   }
 };
 
-// Funções auxiliares aprimoradas =======================================
+// Funções auxiliares melhoradas =======================================
 
-async function performRAGSearch(query: string): Promise<string> {
+async function performEnhancedRAGSearch(query: string): Promise<{context: string, results: SearchResult[]}> {
   try {
     const embeddedDocs = await getEmbeddedDocuments();
     
-    // Se não há documentos embedded, retorna vazio rapidamente
     if (!embeddedDocs || embeddedDocs.length === 0) {
       console.log("📋 Nenhum documento embedded encontrado");
-      return "";
+      return { context: "", results: [] };
     }
 
-    const searchResults = await searchSimilarDocuments(query, embeddedDocs, 3);
-    return formatSearchResults(searchResults);
+    // Expandir a busca para mais resultados e melhor filtragem
+    const searchResults = await searchSimilarDocuments(query, embeddedDocs, 5);
+    
+    // Filtrar resultados com threshold mais baixo para capturar mais contexto
+    const filteredResults = searchResults
+      .filter(r => r.similarity > 0.55) // Threshold mais baixo
+      .slice(0, 3);
+    
+    const context = formatEnhancedSearchResults(filteredResults);
+    
+    return { context, results: filteredResults };
     
   } catch (error) {
     console.error("Erro na busca RAG:", error);
@@ -110,32 +119,55 @@ async function performRAGSearch(query: string): Promise<string> {
   }
 }
 
-function formatSearchResults(results: SearchResult[]): string {
+function formatEnhancedSearchResults(results: SearchResult[]): string {
   if (!results?.length) return "";
 
   return results
-    .filter(r => r.similarity > 0.65)
-    .slice(0, 3)
-    .map(r => `[Fonte: ${r.document.metadata.title}]\n${r.document.content.slice(0, 400)}...`)
+    .map((r, index) => {
+      const source = r.document.metadata.title || `Documento ${index + 1}`;
+      const content = r.document.content.slice(0, 500); // Mais contexto
+      const confidence = Math.round(r.similarity * 100);
+      
+      return `[Fonte: ${source} - Relevância: ${confidence}%]\n${content}...`;
+    })
     .join("\n\n---\n\n");
 }
 
-function buildSystemMessage(context: string, status: string) {
+function buildEnhancedSystemMessage(context: string, status: string, results: SearchResult[]) {
   const baseInstructions = `
-  Como especialista em incêndios florestais em Portugal, siga estas regras:
-  1. Responde em português europeu, formal mas acessível
-  2. Seja conciso (1-2 parágrafos)
-  3. ${context ? 'Baseie-se no contexto fornecido' : 'Use conhecimento geral sobre incêndios florestais'}
-  4. Se algo não estiver especificado no contexto, usa conhecimento geral
-  5. Caso não saiba algo específico, responda: "Não possuo dados suficientes sobre isso"
-  `;
+Você é um especialista em incêndios florestais e análise de severidade em Portugal, integrado na plataforma SeverusPT.
+
+REGRAS FUNDAMENTAIS:
+1. Responda SEMPRE em português europeu, de forma clara e técnica
+2. Seja preciso e baseado em evidências
+3. Se usar informações do contexto, mencione a fonte
+4. Para questões técnicas sobre índices (NBR, NDVI, RdNBR), seja específico
+5. Se não tiver informação suficiente, seja honesto sobre as limitações
+
+CONTEXTO DA PLATAFORMA:
+- SeverusPT é uma plataforma científica para análise de severidade de incêndios
+- Usa dados de satélite (MODIS, LANDSAT, SENTINEL-2)
+- Principais funcionalidades: Burn Severity Mapper e Fire Severity Analyst
+- Trabalha com índices espectrais para avaliar danos de incêndios
+
+FORMATO DE RESPOSTA:
+- Seja conciso mas completo (2-3 parágrafos máximo)
+- Use terminologia técnica quando apropriado
+- Inclua exemplos práticos quando possível
+- Termine com sugestões de ação se relevante
+`;
 
   let content = baseInstructions;
   
   if (context && status === "contexto_encontrado") {
-    content += `\n\nCONTEXTO RELEVANTE:\n${context.slice(0, 1200)}`;
+    content += `\n\nCONTEXTO RELEVANTE DOS DOCUMENTOS:\n${context.slice(0, 1500)}`;
+    
+    if (results.length > 0) {
+      const sources = results.map(r => r.document.metadata.title).join(", ");
+      content += `\n\nFONTES CONSULTADAS: ${sources}`;
+    }
   } else if (status === "erro_rag") {
-    content += `\n\nNOTA: Sistema de busca temporariamente indisponível. Responda com conhecimento geral.`;
+    content += `\n\nNOTA: Sistema de busca temporariamente indisponível. Responda com conhecimento geral sobre incêndios florestais portugueses.`;
   }
 
   return {
@@ -144,13 +176,21 @@ function buildSystemMessage(context: string, status: string) {
   };
 }
 
+function optimizeMessageHistory(messages: ChatMessage[], systemMessage: ChatMessage): ChatMessage[] {
+  // Manter apenas as últimas 6 mensagens para não sobrecarregar o contexto
+  const recentMessages = messages.slice(-6);
+  
+  // Adicionar o system message no início
+  return [systemMessage, ...recentMessages];
+}
+
 type ChatMessage = { role: string; content: string };
 
-async function generateAIResponseWithRetry(messages: ChatMessage[], maxRetries: number = 2): Promise<string> {
+async function generateAIResponseWithRetry(messages: ChatMessage[], maxRetries: number = 3): Promise<string> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout
 
       const completion = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
@@ -163,9 +203,12 @@ async function generateAIResponseWithRetry(messages: ChatMessage[], maxRetries: 
         body: JSON.stringify({
           model: "deepseek/deepseek-r1-0528:free",
           messages,
-          temperature: 0.7,
-          max_tokens: 600, // Reduzido para resposta mais rápida
-          timeout: 12000 // Timeout no modelo
+          temperature: 0.3, // Reduzido para respostas mais consistentes
+          max_tokens: 800,   // Aumentado para respostas mais completas
+          top_p: 0.9,       // Melhor qualidade de resposta
+          frequency_penalty: 0.1, // Reduzir repetição
+          presence_penalty: 0.1,  // Encorajar variedade
+          timeout: 15000
         }),
         signal: controller.signal
       });
@@ -173,31 +216,55 @@ async function generateAIResponseWithRetry(messages: ChatMessage[], maxRetries: 
       clearTimeout(timeoutId);
 
       if (!completion.ok) {
-        throw new Error(`HTTP ${completion.status}: ${completion.statusText}`);
+        const errorText = await completion.text();
+        throw new Error(`HTTP ${completion.status}: ${errorText}`);
       }
 
       const data = await completion.json();
       const reply = data.choices?.[0]?.message?.content;
       
-      if (!reply) {
+      if (!reply || reply.trim().length === 0) {
         throw new Error("Resposta vazia do modelo");
       }
 
-      return reply;
+      // Validar se a resposta é sobre o domínio correto
+      if (isValidFireRelatedResponse(reply)) {
+        return reply.trim();
+      } else {
+        throw new Error("Resposta fora do domínio");
+      }
       
     } catch (error) {
       console.error(`Tentativa ${attempt + 1} falhou:`, error);
       
       if (attempt === maxRetries) {
-        // Última tentativa - retorna resposta de fallback
-        return "Peço desculpa, mas estou com dificuldades técnicas temporárias. Por favor, reformule a sua pergunta ou tente novamente em alguns minutos.";
+        return "Peço desculpa, mas estou com dificuldades técnicas temporárias. Por favor, reformule a sua pergunta sobre incêndios florestais ou tente novamente em alguns minutos.";
       }
       
-      // Aguarda antes da próxima tentativa
-      await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+      // Aguarda progressivamente mais tempo entre tentativas
+      await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
     }
   }
   
-  // Fallback final (nunca deveria chegar aqui)
   return "Serviço temporariamente indisponível.";
+}
+
+function isValidFireRelatedResponse(response: string): boolean {
+  const fireKeywords = [
+    'incêndio', 'fogo', 'queimada', 'severidade', 'nbr', 'ndvi', 'rdnbr',
+    'satélite', 'modis', 'landsat', 'sentinel', 'florestal', 'combustível',
+    'icnf', 'sgifr', 'severuspt', 'análise', 'espectral', 'índice'
+  ];
+  
+  const lowerResponse = response.toLowerCase();
+  return fireKeywords.some(keyword => lowerResponse.includes(keyword)) || 
+         lowerResponse.includes('não possuo dados suficientes');
+}
+
+// Função para logging e monitoramento (opcional)
+function logChatInteraction(query: string, response: string, context: string, ragStatus: string) {
+  console.log(`[CHAT] Query: ${query.slice(0, 50)}...`);
+  console.log(`[CHAT] RAG Status: ${ragStatus}`);
+  console.log(`[CHAT] Context Length: ${context.length}`);
+  console.log(`[CHAT] Response Length: ${response.length}`);
 }

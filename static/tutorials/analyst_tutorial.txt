@@ -19,7 +19,7 @@ Left sidebar → **Panel “Analyst – Análise”**
 ⑤ **Window (days)** – size of each composite for delta plot (7‑90 days).
 
 --------------------------------------------------------------------
-2  Define AOI
+2  Define AOI (Area of Interest)
 --------------------------------------------------------------------
 Same options as Mapper (drawn shape, lon/lat, or selected burned polygon).
 
