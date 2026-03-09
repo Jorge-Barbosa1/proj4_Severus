@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
+import 'leaflet/dist/leaflet.css';
+import 'leaflet-draw/dist/leaflet.draw.css';
 
 export interface MapHandle {
   addBurnedAreaLayer: (id: string, geojson: any, options: { color: string; fillOpacity: number }) => Promise<void>;
@@ -221,9 +223,7 @@ const Map = forwardRef<MapHandle>((_props, ref) => {
       const L = (await import('leaflet')).default;
       (window as any).L = L;
 
-      // Load CSS
-      require('leaflet/dist/leaflet.css');
-      require('leaflet-draw/dist/leaflet.draw.css');
+      // Load leaflet-draw
       await import('leaflet-draw');
 
       // Create map
