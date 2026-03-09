@@ -2,7 +2,7 @@
  * gee-service.ts  –  utilidades Earth Engine para a app SeverusPT
  *********************************************************************/
 
-import { getEE } from '$lib/utils/gee-utils';
+import { getEE } from '../utils/gee-utils.js';
 import ee from '@google/earthengine';
 
 /* ------------------------------------------------------------------ *
