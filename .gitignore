@@ -18,6 +18,11 @@ Thumbs.db
 !.env.example
 !.env.test
 
+# GEE Credentials (sensitive)
+severus-457615-83acf40ce029.json
+src/lib/config/severus-457615-83acf40ce029.json
+**/severus*.json
+
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
