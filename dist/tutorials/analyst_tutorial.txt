@@ -1,0 +1,66 @@
+SeverusPT – Fire Severity **Analyst** (Quick Guide)
+============================================================
+
+Adapted from <https://severus.pt/en/fire-severity-analyst-help/>.
+
+‣ **Purpose**
+
+Plot time‑series of NBR or NDVI over any AOI and build a post‑fire severity‑and‑recovery trajectory (delta‑index vs. time).
+
+--------------------------------------------------------------------
+1  Prepare Inputs
+--------------------------------------------------------------------
+Left sidebar → **Panel “Analyst – Análise”**
+
+① **Sensor** – Terra/MODIS, Landsat‑5/7/8/9, Sentinel‑2 or HLS.  
+② **Spectral index** – *NBR* or *NDVI*.  
+③ **Fire date** – yyyy‑mm‑dd.  
+④ **Analysis period** – choose start & end dates that bracket the fire (may extend to present).  
+⑤ **Window (days)** – size of each composite for delta plot (7‑90 days).
+
+--------------------------------------------------------------------
+2  Define AOI (Area of Interest)
+--------------------------------------------------------------------
+Same options as Mapper (drawn shape, lon/lat, or selected burned polygon).
+
+--------------------------------------------------------------------
+3  Generate Plots
+--------------------------------------------------------------------
+● **📈 Gerar gráfico**  
+   – Builds a mean‑value time‑series for the selected index and AOI.  
+● **🔥 Calcular severidade**  
+   – Creates moving‑window composites of size *window days*.  
+   – Calculates ΔIndex = value – pre‑fire composite.  
+   – Plots Δ vs. days‑since‑fire, giving a recovery curve.
+
+Both charts can be exported using the download icon (upper‑right of chart).
+
+--------------------------------------------------------------------
+4  Interpreting the Delta Plot
+--------------------------------------------------------------------
+• Negative dNBR (or positive dNDVI) after fire indicates vegetation recovery.  
+• Flat line near 0 → little change.  
+• Persistent high |Δ| suggests severe burn or slow regeneration.
+
+--------------------------------------------------------------------
+5  Common Pitfalls
+--------------------------------------------------------------------
+• Ensure the fire date lies inside the analysis period.  
+• Large windows with high‑resolution sensors (Sentinel‑2 20 m) may be slow.  
+• If the delta plot shows *null* values, the pre‑fire composite might be empty – reduce cloud % or shorten the pre‑window.
+
+--------------------------------------------------------------------
+Supported Data & Resolutions
+--------------------------------------------------------------------
+* Terra/MODIS – 500 m, 8‑day  
+* Landsat‑5 TM – 30 m, 16‑day  
+* Landsat‑7 ETM+ – 30 m, 16‑day  
+* Landsat‑8/9 OLI – 30 m, 16‑day  
+* Sentinel‑2 MSI – 20 m, 5‑day
+
+--------------------------------------------------------------------
+6  Tips & Limits
+--------------------------------------------------------------------
+• Very large polygons or long time windows may trigger Earth‑Engine time‑outs.  
+• Sentinel‑2 data available from March 2017; Landsat 8 from March 2013; MODIS from Feb 2000.  
+--------------------------------------------------------------------
