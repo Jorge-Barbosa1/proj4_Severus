@@ -182,10 +182,3 @@ NODE_ENV=production
 - Initialize RAG: `npm run create-embeddings`
 - Check RAG status: `GET /api/rag/status`
 
-## 📄 License
-
-Private project for wildfire analysis research.
-
-## 👥 Authors
-
-SeverusPT Team - Wildfire Analysis for Portugal
