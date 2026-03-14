@@ -10,6 +10,31 @@ import {
 
 const router = express.Router();
 
+const SOURCE_UNAVAILABLE = 'SOURCE_UNAVAILABLE';
+
+// Centralized data source capabilities for satellite-only mode and future toggles.
+const GEE_CAPABILITIES = {
+  satelliteOnlyMode: process.env.SATELLITE_ONLY_MODE === 'true',
+  burnedAreaSources: {
+    ICNF: process.env.ICNF_DATASET_ID ?? 'users/joaofgo/severus_pt/AA_ICNF_2000_2021_PT_v2',
+    EFFIS: process.env.EFFIS_DATASET_ID ?? 'users/joaofgo/severus_pt/effis_all'
+  }
+};
+
+function unavailableSourceResponse(res) {
+  return res.status(503).json({
+    code: SOURCE_UNAVAILABLE,
+    message: 'Reference burned-area dataset is not configured',
+    fallback: 'Use drawn geometry + satellite analysis'
+  });
+}
+
+function isBurnedAreaSourceEnabled(dataset) {
+  if (GEE_CAPABILITIES.satelliteOnlyMode) return false;
+  const sourceId = GEE_CAPABILITIES.burnedAreaSources[dataset];
+  return typeof sourceId === 'string' && sourceId.trim().length > 0;
+}
+
 // Visualization palettes
 const VIS = {
   deltaNBR: { min: 0, max: 0.85, palette: ['b6cdff', 'efcc4b', 'c03838'] },
@@ -25,18 +50,22 @@ const VIS = {
 router.post('/burned-areas', async (req, res) => {
   try {
     const { dataset, year } = req.body;
-    const ee = await getEE();
-
-    const datasets = {
-      ICNF: 'users/joaofgo/severus_pt/AA_ICNF_2000_2021_PT_v2',
-      EFFIS: 'users/joaofgo/severus_pt/effis_all'
-    };
-
-    if (!datasets[dataset]) {
-      return res.status(400).json({ error: 'Dataset inválido' });
+    if (!dataset || !year) {
+      return res.status(400).json({ message: 'Missing parameters: dataset and year are required' });
     }
 
-    const collection = ee.FeatureCollection(datasets[dataset])
+    if (!['ICNF', 'EFFIS'].includes(dataset)) {
+      return res.status(400).json({ message: 'Dataset inválido. Use ICNF ou EFFIS' });
+    }
+
+    if (!isBurnedAreaSourceEnabled(dataset)) {
+      return unavailableSourceResponse(res);
+    }
+
+    const ee = await getEE();
+    const datasetId = GEE_CAPABILITIES.burnedAreaSources[dataset];
+
+    const collection = ee.FeatureCollection(datasetId)
       .filter(ee.Filter.eq(dataset === 'ICNF' ? 'Ano' : 'year', year));
 
     const geojson = await new Promise((resolve, reject) => {
@@ -93,6 +122,12 @@ router.post('/severity-maps', async (req, res) => {
       segmMinPix
     } = req.body;
 
+    if (!satellite || !geometry || !preStart || !preEnd || !postStart || !postEnd) {
+      return res.status(400).json({
+        message: 'Missing parameters: satellite, geometry, preStart, preEnd, postStart, postEnd are required'
+      });
+    }
+
     const sat = normalizeSatelliteLabel(satellite);
 
     const imgs = await generateSeverityMaps({
@@ -136,8 +171,15 @@ router.post('/severity-maps', async (req, res) => {
 // POST /api/gee/image-list
 router.post('/image-list', async (req, res) => {
   try {
-    const ee = await getEE();
     const { satellite, preStart, preEnd, postStart, postEnd, geometry } = req.body;
+
+    if (!satellite || !preStart || !preEnd || !postStart || !postEnd || !geometry) {
+      return res.status(400).json({
+        message: 'Missing parameters: satellite, preStart, preEnd, postStart, postEnd, geometry are required'
+      });
+    }
+
+    const ee = await getEE();
 
     const region = ee.Geometry(geometry);
     const sat = normalizeSatelliteLabel(satellite);
@@ -171,11 +213,18 @@ router.post('/image-list', async (req, res) => {
 // POST /api/gee/severity
 router.post('/severity', async (req, res) => {
   try {
-    const ee = await getEE();
     const {
       satellite: satLabel,
       index, fireDate, windowSize, geometry
     } = req.body;
+
+    if (!satLabel || !index || !fireDate || !windowSize || !geometry) {
+      return res.status(400).json({
+        message: 'Missing parameters: satellite, index, fireDate, windowSize, geometry are required'
+      });
+    }
+
+    const ee = await getEE();
 
     const sat = normalizeSatelliteLabel(satLabel);
     const cfg = SAT_CONF[sat];
@@ -240,7 +289,6 @@ router.post('/severity', async (req, res) => {
 // POST /api/gee/severity-stats
 router.post('/severity-stats', async (req, res) => {
   try {
-    const ee = await getEE();
     const {
       geometry,
       satellite,
@@ -250,9 +298,21 @@ router.post('/severity-stats', async (req, res) => {
       postEnd
     } = req.body;
 
+    if (!geometry || !satellite || !preStart || !preEnd || !postStart || !postEnd) {
+      return res.status(400).json({
+        message: 'Missing parameters: geometry, satellite, preStart, preEnd, postStart, postEnd are required'
+      });
+    }
+
+    const ee = await getEE();
+
     const geom = ee.Geometry(geometry);
     const sat = normalizeSatelliteLabel(satellite);
     const cfg = SAT_CONF[sat];
+    if (!cfg) {
+      return res.status(400).json({ error: `Satélite não suportado: ${satellite}` });
+    }
+
     const scale = cfg?.scale ?? 30;
 
     // Get pre and post collections

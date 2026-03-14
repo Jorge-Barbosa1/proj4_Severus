@@ -31,4 +31,23 @@ This file tracks patterns, corrections, and learnings during the SvelteKit → R
 
 ---
 
+## Satellite-Only Branch Lessons (March 14, 2026)
+
+### 5. Environment Variables Must Be Explicitly Loaded
+- **Issue**: FIRMS key was in `.env` but API still reported `FIRMS_MAP_KEY is not configured`
+- **Solution**: Load dotenv at server startup (`import 'dotenv/config'`)
+- **Lesson**: Always verify runtime env loading before diagnosing API integration failures
+
+### 6. Keep Legacy Data Controls Optional
+- **Issue**: Old burned-area controls were still presented as primary flow, causing confusion in satellite-only mode
+- **Solution**: Move legacy burned-area inputs to an optional advanced section
+- **Lesson**: In progressive migrations, hide legacy dependencies behind optional controls and keep the new flow primary
+
+### 7. Always Update Tracking Docs at Milestones
+- **Issue**: Progress can drift if code changes are not reflected in planning docs
+- **Solution**: Update `todo.md` and `lessons.md` in the same cycle as implementation and commit
+- **Lesson**: Treat docs as part of the deliverable, not as an afterthought
+
+---
+
 *Lessons will continue to be added as Phase 3+ progresses*
