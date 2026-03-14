@@ -1,9 +1,11 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import chatRouter from './src/api/routes/chat.js';
 import ragRouter from './src/api/routes/rag.js';
 import geeRouter from './src/api/routes/gee.js';
+import firmsRouter from './src/api/routes/firms.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,6 +21,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/api/chat', chatRouter);
 app.use('/api/rag', ragRouter);
 app.use('/api/gee', geeRouter);
+app.use('/api/firms', firmsRouter);
 
 // Serve React static files
 app.use(express.static(path.join(__dirname, 'dist')));

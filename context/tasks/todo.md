@@ -530,3 +530,63 @@ npm start              # Start Express server with tsx
 2. Begin Phase 1 (setup)
 3. Systematic execution following the checklist
 4. Verify each phase before proceeding
+
+---
+
+## Satellite-Only Branch Plan (Execution)
+
+### Objective
+- Remove hard dependency on ICNF/EFFIS private assets.
+- Keep full analyst/mapper workflows operational using satellite data only.
+- Keep official burned-area layers as optional add-ons for future integration.
+
+### Priority Order
+1. Data-source decoupling (critical)
+2. Mobile responsiveness (second priority)
+3. UX and analysis improvements
+4. Real-time and collaboration features
+5. RAG work (deferred / lowest priority)
+
+### Phase SO-1: Capability Refactor (Backend)
+- [x] Add capability config for optional data sources in `src/api/routes/gee.js`
+- [x] Make `/api/gee/burned-areas` return structured "unavailable" response when source is not configured
+- [x] Ensure `/api/gee/time-series`, `/api/gee/severity`, `/api/gee/severity-maps`, `/api/gee/image-list`, `/api/gee/severity-stats` work independently from ICNF/EFFIS
+- [x] Standardize API fallback payload:
+  - `code: "SOURCE_UNAVAILABLE"`
+  - `message: "Reference burned-area dataset is not configured"`
+  - `fallback: "Use drawn geometry + satellite analysis"`
+
+### Phase SO-2: Satellite-First UX (Frontend)
+- [ ] Make dataset/year burned-area controls optional in `src/pages/Home.tsx`
+- [ ] Add primary satellite-first path: draw geometry -> choose satellite -> choose dates -> run analysis
+- [ ] Show non-blocking warnings if burned-area layer cannot load
+- [ ] Keep all three date modes unchanged
+- [ ] Add clear empty-state guidance when no geometry exists
+
+### Phase SO-3: Mobile Responsiveness (Priority 2)
+- [ ] Add responsive breakpoints (`768px`, `480px`)
+- [ ] Convert fixed sidebar layout to responsive panel/drawer
+- [ ] Ensure touch targets >= `44px`
+- [ ] Validate map drawing and controls on mobile
+- [ ] Validate chart readability and overflow behavior on mobile
+
+### Phase SO-4: UX Improvements
+- [ ] Add loading states for long GEE operations
+- [ ] Add toast notifications for success/error/info
+- [ ] Add retry flows for transient API failures
+- [ ] Add lightweight layer management UI (show/hide/remove)
+
+### Phase SO-5: Advanced Additions (After Core)
+- [ ] Statistics dashboard enhancements
+- [ ] Export tools (CSV/GeoJSON/GeoTIFF/PDF)
+- [ ] Comparison views (multi-fire)
+- [ ] Optional climate overlays
+
+### Phase SO-6: Verification
+- [ ] Mapper works end-to-end without burned-area datasets
+- [ ] Analyst charts work end-to-end from drawn geometry only
+- [ ] Build and run pass (`npm run build`, `npm start`)
+- [ ] Mobile checks pass on core workflows
+
+### Deferred (Explicitly Lowest Priority)
+- [ ] RAG improvements remain deferred until requested

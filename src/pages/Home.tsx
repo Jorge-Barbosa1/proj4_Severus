@@ -40,6 +40,11 @@ function Home() {
   const [imgLists, setImgLists] = useState<ImgList[]>([]);
   const [nextListId, setNextListId] = useState(1);
 
+  // FIRMS status (new satellite-first context)
+  const [firmsConfigured, setFirmsConfigured] = useState<boolean | null>(null);
+  const [firmsLoading, setFirmsLoading] = useState(false);
+  const [firmsMessage, setFirmsMessage] = useState('');
+
   // Date Variables - Calculated (final dates used by API)
   const [preFireStart, setPreFireStart] = useState(new Date().toISOString().split('T')[0]);
   const [preFireEnd, setPreFireEnd] = useState(new Date().toISOString().split('T')[0]);
@@ -102,6 +107,10 @@ function Home() {
       : '/tutorials/analyst_tutorial.txt',
     [mode]
   );
+
+  const friendlyGeometryStatus = selectedGeometry
+    ? 'Area selected. You can run analysis now.'
+    : 'No area selected yet. Draw a polygon/rectangle on the map first.';
 
   // Load mode from localStorage
   useEffect(() => {
@@ -262,74 +271,222 @@ function Home() {
     setNextListId(nextListId + 1);
   };
 
+  const checkFirmsStatus = async () => {
+    setFirmsLoading(true);
+    setFirmsMessage('Checking FIRMS connection...');
+
+    try {
+      const res = await fetch('/api/firms/status');
+      const data = await res.json();
+      setFirmsConfigured(Boolean(data.configured));
+      setFirmsMessage(
+        data.configured
+          ? 'FIRMS is connected and ready.'
+          : 'FIRMS key is missing. Add FIRMS_MAP_KEY to .env and restart server.'
+      );
+    } catch (err) {
+      console.error(err);
+      setFirmsConfigured(false);
+      setFirmsMessage('Could not reach FIRMS endpoint right now.');
+    } finally {
+      setFirmsLoading(false);
+    }
+  };
+
+  const testFirmsHistorical = async () => {
+    setFirmsLoading(true);
+    setFirmsMessage('Testing historical FIRMS query...');
+
+    try {
+      const url = '/api/firms/historical?dataset=VIIRS_SNPP_SP&bbox=-10.0,36.8,-6.0,42.3&days=1&date=2016-08-16';
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if (!res.ok) {
+        setFirmsMessage(data.error || 'Historical FIRMS test failed.');
+        return;
+      }
+
+      setFirmsMessage(`Historical FIRMS test succeeded: ${data.count ?? 0} detections for 2016-08-16.`);
+    } catch (err) {
+      console.error(err);
+      setFirmsMessage('Historical FIRMS test failed due to network/server error.');
+    } finally {
+      setFirmsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    checkFirmsStatus();
+  }, []);
+
   return (
-    <div style={{ display: 'flex', height: '100vh', flexDirection: 'column' }}>
-      {/* Header */}
-      <header style={{ padding: '1rem', background: '#1a1a1a', color: 'white', display: 'flex', gap: '1rem', alignItems: 'center' }}>
-        <h1 style={{ margin: 0, fontSize: '1.5rem' }}>🔥 FireAnalyst - SeverusPT</h1>
-        <nav style={{ display: 'flex', gap: '1rem', marginLeft: 'auto' }}>
+    <div style={{ display: 'flex', height: '100vh', flexDirection: 'column', background: '#f3f5f8' }}>
+      <header
+        style={{
+          padding: '0.9rem 1.1rem',
+          background: 'linear-gradient(120deg, #1f2937 0%, #0f172a 100%)',
+          color: 'white',
+          display: 'flex',
+          gap: '0.75rem',
+          alignItems: 'center'
+        }}
+      >
+        <h1 style={{ margin: 0, fontSize: '1.15rem', letterSpacing: '0.2px' }}>FireAnalyst • Portugal</h1>
+        <span
+          style={{
+            fontSize: '0.75rem',
+            padding: '0.25rem 0.55rem',
+            borderRadius: '999px',
+            background: firmsConfigured ? '#14532d' : '#7f1d1d',
+            border: '1px solid rgba(255,255,255,0.18)'
+          }}
+        >
+          FIRMS {firmsConfigured ? 'Connected' : 'Not configured'}
+        </span>
+
+        <nav style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
           <button
             onClick={() => switchMode('mapper')}
             style={{
-              padding: '0.5rem 1rem',
-              background: mode === 'mapper' ? '#FF6B35' : '#333',
+              padding: '0.5rem 0.85rem',
+              background: mode === 'mapper' ? '#f97316' : '#334155',
               color: 'white',
-              border: 'none',
-              borderRadius: '4px',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: '8px',
               cursor: 'pointer',
-              fontWeight: mode === 'mapper' ? 'bold' : 'normal'
+              fontWeight: 600
             }}
           >
-            🗺️ Mapper
+            Mapper
           </button>
           <button
             onClick={() => switchMode('analyst')}
             style={{
-              padding: '0.5rem 1rem',
-              background: mode === 'analyst' ? '#FF6B35' : '#333',
+              padding: '0.5rem 0.85rem',
+              background: mode === 'analyst' ? '#f97316' : '#334155',
               color: 'white',
-              border: 'none',
-              borderRadius: '4px',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: '8px',
               cursor: 'pointer',
-              fontWeight: mode === 'analyst' ? 'bold' : 'normal'
+              fontWeight: 600
             }}
           >
-            📊 Analyst
+            Analyst
           </button>
           <InfoDialog docPath={helpDocPath} />
         </nav>
       </header>
 
-      {/* Main Content */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* Sidebar */}
-        <aside style={{ width: '320px', background: '#f5f5f5', padding: '1rem', overflowY: 'auto', borderRight: '1px solid #ddd' }}>
-          <h2 style={{ marginTop: 0, fontSize: '1.2rem' }}>{mode === 'mapper' ? '🗺️ Mapper' : '📊 Analyst'}</h2>
+        <aside
+          style={{
+            width: '360px',
+            background: '#ffffff',
+            padding: '1rem',
+            overflowY: 'auto',
+            borderRight: '1px solid #e5e7eb'
+          }}
+        >
+          <div
+            style={{
+              marginBottom: '1rem',
+              border: '1px solid #e5e7eb',
+              borderRadius: '10px',
+              background: '#fafafa',
+              padding: '0.75rem'
+            }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: '0.4rem' }}>Quick guide</div>
+            <div style={{ fontSize: '0.9rem', color: '#374151' }}>1) Draw area on the map</div>
+            <div style={{ fontSize: '0.9rem', color: '#374151' }}>2) Choose satellite and dates</div>
+            <div style={{ fontSize: '0.9rem', color: '#374151' }}>3) Run analysis</div>
+            <div
+              style={{
+                marginTop: '0.6rem',
+                fontSize: '0.85rem',
+                color: selectedGeometry ? '#166534' : '#92400e',
+                fontWeight: 600
+              }}
+            >
+              {friendlyGeometryStatus}
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginBottom: '1rem',
+              border: '1px solid #dbeafe',
+              borderRadius: '10px',
+              background: '#eff6ff',
+              padding: '0.75rem'
+            }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: '0.45rem', color: '#1e3a8a' }}>NASA FIRMS</div>
+            <div style={{ fontSize: '0.85rem', color: '#1e3a8a', marginBottom: '0.5rem' }}>
+              Live and historical hotspot detections for Portugal.
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <button
+                onClick={checkFirmsStatus}
+                disabled={firmsLoading}
+                style={{
+                  padding: '0.45rem 0.65rem',
+                  border: '1px solid #93c5fd',
+                  borderRadius: '8px',
+                  background: 'white',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem'
+                }}
+              >
+                Check connection
+              </button>
+              <button
+                onClick={testFirmsHistorical}
+                disabled={firmsLoading}
+                style={{
+                  padding: '0.45rem 0.65rem',
+                  border: '1px solid #93c5fd',
+                  borderRadius: '8px',
+                  background: 'white',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem'
+                }}
+              >
+                Test 2016-08-16
+              </button>
+            </div>
+            <div style={{ fontSize: '0.82rem', color: '#1e3a8a' }}>{firmsMessage}</div>
+          </div>
+
+          <h2 style={{ marginTop: 0, marginBottom: '0.7rem', fontSize: '1.05rem' }}>
+            {mode === 'mapper' ? 'Mapper tools' : 'Analyst tools'}
+          </h2>
 
           {mode === 'mapper' ? (
             <>
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Dataset:</label>
+              <div style={{ marginBottom: '0.9rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Reference dataset (optional)</label>
                 <select
                   value={selectedDataset}
                   onChange={(e) => setSelectedDataset(e.target.value)}
-                  style={{ width: '100%', padding: '0.5rem' }}
+                  style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db' }}
                 >
-                  <option value="">Select dataset</option>
-                  {datasets.map(d => <option key={d} value={d}>{d}</option>)}
+                  <option value="">Skip (satellite-only workflow)</option>
+                  {datasets.map((d) => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
 
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Year:</label>
+              <div style={{ marginBottom: '0.9rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Year (optional)</label>
                 <select
                   value={selectedYear}
                   onChange={(e) => setSelectedYear(e.target.value)}
-                  style={{ width: '100%', padding: '0.5rem' }}
+                  style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db' }}
                   disabled={!selectedDataset}
                 >
                   <option value="">Select year</option>
-                  {years.map(y => <option key={y} value={y}>{y}</option>)}
+                  {years.map((y) => <option key={y} value={y}>{y}</option>)}
                 </select>
               </div>
 
@@ -338,56 +495,58 @@ function Home() {
                 disabled={!selectedDataset || !selectedYear}
                 style={{
                   width: '100%',
-                  padding: '0.75rem',
-                  background: '#FF6B35',
+                  padding: '0.7rem',
+                  background: '#f97316',
                   color: 'white',
                   border: 'none',
-                  borderRadius: '4px',
+                  borderRadius: '8px',
                   cursor: 'pointer',
-                  marginBottom: '1rem'
+                  marginBottom: '1rem',
+                  fontWeight: 600,
+                  opacity: (!selectedDataset || !selectedYear) ? 0.6 : 1
                 }}
               >
-                Load Burned Areas
+                Load burned areas (optional)
               </button>
 
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Satellite:</label>
+              <div style={{ marginBottom: '0.9rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Satellite</label>
                 <select
                   value={selectedSatellite}
                   onChange={(e) => setSelectedSatellite(e.target.value)}
-                  style={{ width: '100%', padding: '0.5rem' }}
+                  style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db' }}
                 >
                   <option value="">Select satellite</option>
-                  {satellites.map(s => <option key={s} value={s}>{s}</option>)}
+                  {satellites.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
 
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Date Mode:</label>
+              <div style={{ marginBottom: '0.9rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Date mode</label>
                 <select
                   value={dateMode}
                   onChange={(e) => setDateMode(e.target.value as DateMode)}
-                  style={{ width: '100%', padding: '0.5rem' }}
+                  style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db' }}
                 >
-                  <option value="1">Fire Date ± Days</option>
-                  <option value="2">4 Specific Dates</option>
-                  <option value="3">Compare with Previous Year</option>
+                  <option value="1">Fire date plus/minus days</option>
+                  <option value="2">Manual pre and post dates</option>
+                  <option value="3">Compare with previous year</option>
                 </select>
               </div>
 
               {dateMode === '1' && (
                 <>
-                  <div style={{ marginBottom: '1rem' }}>
-                    <label>Fire Date:</label>
+                  <div style={{ marginBottom: '0.9rem' }}>
+                    <label style={{ fontWeight: 600 }}>Fire date</label>
                     <input
                       type="date"
                       value={fireDate}
                       onChange={(e) => setFireDate(e.target.value)}
-                      style={{ width: '100%', padding: '0.5rem' }}
+                      style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db', marginTop: '0.3rem' }}
                     />
                   </div>
-                  <div style={{ marginBottom: '1rem' }}>
-                    <label>Days Before: {daysBefore}</label>
+                  <div style={{ marginBottom: '0.9rem' }}>
+                    <label style={{ fontWeight: 600 }}>Days before: {daysBefore}</label>
                     <input
                       type="range"
                       min="1"
@@ -397,8 +556,8 @@ function Home() {
                       style={{ width: '100%' }}
                     />
                   </div>
-                  <div style={{ marginBottom: '1rem' }}>
-                    <label>Days After: {daysAfter}</label>
+                  <div style={{ marginBottom: '0.9rem' }}>
+                    <label style={{ fontWeight: 600 }}>Days after: {daysAfter}</label>
                     <input
                       type="range"
                       min="1"
@@ -413,40 +572,40 @@ function Home() {
 
               {dateMode === '2' && (
                 <>
-                  <div style={{ marginBottom: '1rem' }}>
-                    <label>Pre-fire Start:</label>
+                  <div style={{ marginBottom: '0.9rem' }}>
+                    <label style={{ fontWeight: 600 }}>Pre-fire start</label>
                     <input
                       type="date"
                       value={preStart}
                       onChange={(e) => setPreStart(e.target.value)}
-                      style={{ width: '100%', padding: '0.5rem' }}
+                      style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db', marginTop: '0.3rem' }}
                     />
                   </div>
-                  <div style={{ marginBottom: '1rem' }}>
-                    <label>Pre-fire End:</label>
+                  <div style={{ marginBottom: '0.9rem' }}>
+                    <label style={{ fontWeight: 600 }}>Pre-fire end</label>
                     <input
                       type="date"
                       value={preEnd}
                       onChange={(e) => setPreEnd(e.target.value)}
-                      style={{ width: '100%', padding: '0.5rem' }}
+                      style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db', marginTop: '0.3rem' }}
                     />
                   </div>
-                  <div style={{ marginBottom: '1rem' }}>
-                    <label>Post-fire Start:</label>
+                  <div style={{ marginBottom: '0.9rem' }}>
+                    <label style={{ fontWeight: 600 }}>Post-fire start</label>
                     <input
                       type="date"
                       value={postStart}
                       onChange={(e) => setPostStart(e.target.value)}
-                      style={{ width: '100%', padding: '0.5rem' }}
+                      style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db', marginTop: '0.3rem' }}
                     />
                   </div>
-                  <div style={{ marginBottom: '1rem' }}>
-                    <label>Post-fire End:</label>
+                  <div style={{ marginBottom: '0.9rem' }}>
+                    <label style={{ fontWeight: 600 }}>Post-fire end</label>
                     <input
                       type="date"
                       value={postEnd}
                       onChange={(e) => setPostEnd(e.target.value)}
-                      style={{ width: '100%', padding: '0.5rem' }}
+                      style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db', marginTop: '0.3rem' }}
                     />
                   </div>
                 </>
@@ -473,57 +632,57 @@ function Home() {
             </>
           ) : (
             <>
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Satellite:</label>
+              <div style={{ marginBottom: '0.9rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Satellite</label>
                 <select
                   value={selectedSatellite}
                   onChange={(e) => setSelectedSatellite(e.target.value)}
-                  style={{ width: '100%', padding: '0.5rem' }}
+                  style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db' }}
                 >
                   <option value="">Select satellite</option>
-                  {satellites.map(s => <option key={s} value={s}>{s}</option>)}
+                  {satellites.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
 
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Index:</label>
+              <div style={{ marginBottom: '0.9rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Index</label>
                 <select
                   value={selectedIndex}
                   onChange={(e) => setSelectedIndex(e.target.value)}
-                  style={{ width: '100%', padding: '0.5rem' }}
+                  style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db' }}
                 >
                   <option value="">Select index</option>
-                  {indices.map(i => <option key={i} value={i}>{i}</option>)}
+                  {indices.map((i) => <option key={i} value={i}>{i}</option>)}
                 </select>
               </div>
 
-              <div style={{ marginBottom: '1rem' }}>
-                <label>Fire Date:</label>
+              <div style={{ marginBottom: '0.9rem' }}>
+                <label style={{ fontWeight: 600 }}>Fire date</label>
                 <input
                   type="date"
                   value={fireDate}
                   onChange={(e) => setFireDate(e.target.value)}
-                  style={{ width: '100%', padding: '0.5rem' }}
+                  style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db', marginTop: '0.3rem' }}
                 />
               </div>
 
-              <div style={{ marginBottom: '1rem' }}>
-                <label>Start Date:</label>
+              <div style={{ marginBottom: '0.9rem' }}>
+                <label style={{ fontWeight: 600 }}>Start date</label>
                 <input
                   type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
-                  style={{ width: '100%', padding: '0.5rem' }}
+                  style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db', marginTop: '0.3rem' }}
                 />
               </div>
 
-              <div style={{ marginBottom: '1rem' }}>
-                <label>End Date:</label>
+              <div style={{ marginBottom: '0.9rem' }}>
+                <label style={{ fontWeight: 600 }}>End date</label>
                 <input
                   type="date"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
-                  style={{ width: '100%', padding: '0.5rem' }}
+                  style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db', marginTop: '0.3rem' }}
                 />
               </div>
 
@@ -540,13 +699,11 @@ function Home() {
           )}
         </aside>
 
-        {/* Map Container */}
         <main style={{ flex: 1, position: 'relative' }}>
           <Map ref={mapComponentRef} />
         </main>
       </div>
 
-      {/* Chat Widget */}
       <ChatWidget />
     </div>
   );
