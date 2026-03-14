@@ -557,11 +557,11 @@ npm start              # Start Express server with tsx
   - `fallback: "Use drawn geometry + satellite analysis"`
 
 ### Phase SO-2: Satellite-First UX (Frontend)
-- [ ] Make dataset/year burned-area controls optional in `src/pages/Home.tsx`
-- [ ] Add primary satellite-first path: draw geometry -> choose satellite -> choose dates -> run analysis
-- [ ] Show non-blocking warnings if burned-area layer cannot load
-- [ ] Keep all three date modes unchanged
-- [ ] Add clear empty-state guidance when no geometry exists
+- [x] Make dataset/year burned-area controls optional in `src/pages/Home.tsx`
+- [x] Add primary satellite-first path: draw geometry -> choose satellite -> choose dates -> run analysis
+- [x] Show non-blocking warnings if burned-area layer cannot load
+- [x] Keep all three date modes unchanged
+- [x] Add clear empty-state guidance when no geometry exists
 
 ### Phase SO-3: Mobile Responsiveness (Priority 2)
 - [ ] Add responsive breakpoints (`768px`, `480px`)
@@ -583,10 +583,20 @@ npm start              # Start Express server with tsx
 - [ ] Optional climate overlays
 
 ### Phase SO-6: Verification
-- [ ] Mapper works end-to-end without burned-area datasets
+- [x] Mapper works end-to-end without burned-area datasets
 - [ ] Analyst charts work end-to-end from drawn geometry only
 - [ ] Build and run pass (`npm run build`, `npm start`)
 - [ ] Mobile checks pass on core workflows
 
 ### Deferred (Explicitly Lowest Priority)
 - [ ] RAG improvements remain deferred until requested
+
+---
+
+## March 14 Progress Update
+
+- [x] Added FIRMS backend routes (`/api/firms/status`, `/api/firms/active`, `/api/firms/historical`)
+- [x] Added FIRMS status and test actions in UI
+- [x] Added live FIRMS hotspot rendering on map with popup details
+- [x] Moved old burned-area dataset section into optional advanced controls
+- [ ] Next: mobile-first responsive pass (SO-3)

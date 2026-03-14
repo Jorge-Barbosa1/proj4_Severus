@@ -44,6 +44,8 @@ function Home() {
   const [firmsConfigured, setFirmsConfigured] = useState<boolean | null>(null);
   const [firmsLoading, setFirmsLoading] = useState(false);
   const [firmsMessage, setFirmsMessage] = useState('');
+  const [liveHotspotsCount, setLiveHotspotsCount] = useState<number>(0);
+  const [showReferenceLayers, setShowReferenceLayers] = useState(false);
 
   // Date Variables - Calculated (final dates used by API)
   const [preFireStart, setPreFireStart] = useState(new Date().toISOString().split('T')[0]);
@@ -231,6 +233,11 @@ function Home() {
       });
 
       const geojson = await res.json();
+      if (!res.ok) {
+        setFirmsMessage(geojson?.message || geojson?.error || 'Reference burned-area layer is unavailable. Continue with satellite-only analysis.');
+        return;
+      }
+
       const id = `${selectedDataset}-${selectedYear}`;
       const options = {
         color: dsType === 'ICNF' ? 'red' : 'black',
@@ -247,6 +254,7 @@ function Home() {
       }
     } catch (err) {
       console.error(err);
+      setFirmsMessage('Could not load reference burned-area layer. Continue with satellite-only analysis.');
     }
   };
 
@@ -314,6 +322,37 @@ function Home() {
     } finally {
       setFirmsLoading(false);
     }
+  };
+
+  const loadLiveHotspots = async () => {
+    setFirmsLoading(true);
+    setFirmsMessage('Loading live hotspots...');
+
+    try {
+      const url = '/api/firms/active?dataset=VIIRS_SNPP_NRT&bbox=-10.0,36.8,-6.0,42.3&days=1';
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if (!res.ok) {
+        setFirmsMessage(data.error || 'Could not load live hotspots.');
+        return;
+      }
+
+      await mapComponentRef.current?.addHotspotsLayer('firms-live', data.geojson);
+      setLiveHotspotsCount(data.count ?? 0);
+      setFirmsMessage(`Live hotspots loaded: ${data.count ?? 0}`);
+    } catch (err) {
+      console.error(err);
+      setFirmsMessage('Error loading live hotspots.');
+    } finally {
+      setFirmsLoading(false);
+    }
+  };
+
+  const clearLiveHotspots = () => {
+    mapComponentRef.current?.removeHotspotsLayer('firms-live');
+    setLiveHotspotsCount(0);
+    setFirmsMessage('Live hotspots removed from map.');
   };
 
   useEffect(() => {
@@ -456,6 +495,38 @@ function Home() {
                 Test 2016-08-16
               </button>
             </div>
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <button
+                onClick={loadLiveHotspots}
+                disabled={firmsLoading || !firmsConfigured}
+                style={{
+                  padding: '0.45rem 0.65rem',
+                  border: '1px solid #93c5fd',
+                  borderRadius: '8px',
+                  background: 'white',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem'
+                }}
+              >
+                Show live hotspots
+              </button>
+              <button
+                onClick={clearLiveHotspots}
+                style={{
+                  padding: '0.45rem 0.65rem',
+                  border: '1px solid #93c5fd',
+                  borderRadius: '8px',
+                  background: 'white',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem'
+                }}
+              >
+                Clear hotspots
+              </button>
+            </div>
+            <div style={{ fontSize: '0.82rem', color: '#1e3a8a', marginBottom: '0.3rem' }}>
+              Hotspots on map: {liveHotspotsCount}
+            </div>
             <div style={{ fontSize: '0.82rem', color: '#1e3a8a' }}>{firmsMessage}</div>
           </div>
 
@@ -465,49 +536,70 @@ function Home() {
 
           {mode === 'mapper' ? (
             <>
-              <div style={{ marginBottom: '0.9rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Reference dataset (optional)</label>
-                <select
-                  value={selectedDataset}
-                  onChange={(e) => setSelectedDataset(e.target.value)}
-                  style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db' }}
+              <div style={{ marginBottom: '1rem', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '0.65rem' }}>
+                <button
+                  onClick={() => setShowReferenceLayers(!showReferenceLayers)}
+                  style={{
+                    width: '100%',
+                    padding: '0.55rem 0.65rem',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    background: '#f9fafb',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    fontWeight: 600
+                  }}
                 >
-                  <option value="">Skip (satellite-only workflow)</option>
-                  {datasets.map((d) => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
+                  {showReferenceLayers ? 'Hide' : 'Show'} reference burned-area layers (advanced)
+                </button>
 
-              <div style={{ marginBottom: '0.9rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Year (optional)</label>
-                <select
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(e.target.value)}
-                  style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db' }}
-                  disabled={!selectedDataset}
-                >
-                  <option value="">Select year</option>
-                  {years.map((y) => <option key={y} value={y}>{y}</option>)}
-                </select>
-              </div>
+                {showReferenceLayers && (
+                  <div style={{ marginTop: '0.7rem' }}>
+                    <div style={{ marginBottom: '0.9rem' }}>
+                      <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Reference dataset</label>
+                      <select
+                        value={selectedDataset}
+                        onChange={(e) => setSelectedDataset(e.target.value)}
+                        style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db' }}
+                      >
+                        <option value="">Select dataset</option>
+                        {datasets.map((d) => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                    </div>
 
-              <button
-                onClick={addLayerToMap}
-                disabled={!selectedDataset || !selectedYear}
-                style={{
-                  width: '100%',
-                  padding: '0.7rem',
-                  background: '#f97316',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  marginBottom: '1rem',
-                  fontWeight: 600,
-                  opacity: (!selectedDataset || !selectedYear) ? 0.6 : 1
-                }}
-              >
-                Load burned areas (optional)
-              </button>
+                    <div style={{ marginBottom: '0.9rem' }}>
+                      <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Year</label>
+                      <select
+                        value={selectedYear}
+                        onChange={(e) => setSelectedYear(e.target.value)}
+                        style={{ width: '100%', padding: '0.55rem', borderRadius: '8px', border: '1px solid #d1d5db' }}
+                        disabled={!selectedDataset}
+                      >
+                        <option value="">Select year</option>
+                        {years.map((y) => <option key={y} value={y}>{y}</option>)}
+                      </select>
+                    </div>
+
+                    <button
+                      onClick={addLayerToMap}
+                      disabled={!selectedDataset || !selectedYear}
+                      style={{
+                        width: '100%',
+                        padding: '0.7rem',
+                        background: '#334155',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        opacity: (!selectedDataset || !selectedYear) ? 0.6 : 1
+                      }}
+                    >
+                      Load reference burned areas
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <div style={{ marginBottom: '0.9rem' }}>
                 <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Satellite</label>

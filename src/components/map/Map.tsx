@@ -5,6 +5,8 @@ import 'leaflet-draw/dist/leaflet.draw.css';
 export interface MapHandle {
   addBurnedAreaLayer: (id: string, geojson: any, options: { color: string; fillOpacity: number }) => Promise<void>;
   removeBurnedAreaLayer: (id: string) => void;
+  addHotspotsLayer: (id: string, geojson: any) => Promise<void>;
+  removeHotspotsLayer: (id: string) => void;
   addTileLayer: (id: string, url: string, opts?: any) => Promise<void>;
   removeTileLayer: (id: string) => void;
   hideTileLayer: (id: string) => void;
@@ -21,6 +23,7 @@ const Map = forwardRef<MapHandle>((_props, ref) => {
   const drawControlRef = useRef<any>(null);
   const [drawing, setDrawing] = useState(false);
   const geoJsonLayersRef = useRef<Record<string, any>>({});
+  const hotspotLayersRef = useRef<Record<string, any>>({});
   const tileLayersRef = useRef<Record<string, any>>({});
   const imageLayerRef = useRef<any>(null);
   const legendControlRef = useRef<any>(null);
@@ -151,6 +154,56 @@ const Map = forwardRef<MapHandle>((_props, ref) => {
       if (geoJsonLayersRef.current[id]) {
         mapRef.current.removeLayer(geoJsonLayersRef.current[id]);
         delete geoJsonLayersRef.current[id];
+      }
+    },
+
+    addHotspotsLayer: async (id: string, geojson: any) => {
+      if (!mapRef.current) return;
+
+      const L = (window as any).L;
+
+      if (hotspotLayersRef.current[id]) {
+        mapRef.current.removeLayer(hotspotLayersRef.current[id]);
+        delete hotspotLayersRef.current[id];
+      }
+
+      const hotspotLayer = L.geoJSON(geojson, {
+        pointToLayer: (_feature: any, latlng: any) => {
+          return L.circleMarker(latlng, {
+            radius: 6,
+            fillColor: '#ef4444',
+            color: '#991b1b',
+            weight: 1,
+            opacity: 1,
+            fillOpacity: 0.8,
+          });
+        },
+        onEachFeature: (feature: any, layer: any) => {
+          const p = feature.properties ?? {};
+          const confidence = p.confidence ?? 'n/a';
+          const frp = p.frp ?? 'n/a';
+          const datetime = p.datetime ?? p.acq_date ?? 'n/a';
+          const source = p.source_dataset ?? 'FIRMS';
+
+          layer.bindPopup(`
+            <div style="min-width: 220px;">
+              <strong>FIRMS hotspot</strong><br/>
+              <strong>Date/Time:</strong> ${datetime}<br/>
+              <strong>Confidence:</strong> ${confidence}<br/>
+              <strong>FRP:</strong> ${frp}<br/>
+              <strong>Dataset:</strong> ${source}
+            </div>
+          `);
+        },
+      }).addTo(mapRef.current);
+
+      hotspotLayersRef.current[id] = hotspotLayer;
+    },
+
+    removeHotspotsLayer: (id: string) => {
+      if (hotspotLayersRef.current[id]) {
+        mapRef.current.removeLayer(hotspotLayersRef.current[id]);
+        delete hotspotLayersRef.current[id];
       }
     },
 
