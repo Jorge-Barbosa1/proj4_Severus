@@ -18,14 +18,6 @@ type TimeSeriesParams = {
 
 type TimeSeriesPoint = { date: Date; value: number | null };
 
-type SeverityParams = {
-  satellite: string;
-  index: 'NDVI' | 'NBR';
-  fireDate: string;                  // YYYY-MM-DD
-  windowSize: number;                // dias
-  geometry: GeoJSON.Geometry;
-};
-
 /* ------------------------------------------------------------------ *
  * 2. CATÁLOGO DE SATÉLITES – todas as diferenças num só sítio
  * ------------------------------------------------------------------ */
@@ -148,49 +140,9 @@ function evaluate<T>(obj: any): Promise<T> {
   return new Promise((ok, err) => obj.evaluate((v: T, e: any) => e ? err(e) : ok(v)));
 }
 
-function cloudFilter(col: any, sat: string, max: number) {
-  if (max == null) return col;
-  switch (sat) {
-    case 'Sentinel2': return col.filter(ee.Filter.lte('CLOUDY_PIXEL_PERCENTAGE', max));
-    case 'Landsat5': case 'Landsat7': case 'Landsat8': case 'Landsat9':
-      return col.filter(ee.Filter.lte('CLOUD_COVER_LAND', max));
-    case 'HLS': return col.filter(ee.Filter.lte('CLOUD_COVERAGE', max));
-    default: return col;
-  }
-}
-
 /* ------------------------------------------------------------------ *
  * 4. COLECÇÃO + CÁLCULO DE ÍNDICE
  * ------------------------------------------------------------------ */
-function buildCollection(
-  ee: any,
-  sat: string,
-  index: 'NDVI' | 'NBR',
-  geom: any,
-  cloudMax?: number
-) {
-  // 1 — colecção bruta
-  let col = ee.ImageCollection(SAT_CONF[sat].ic).filterBounds(geom);
-
-  // 2 — filtro de nebulosidade (se pedido)
-  if (cloudMax != null)
-    col = cloudFilter(col, sat, cloudMax);
-
-  // 3 — calcula o índice mantendo só o time_start
-  const cfg = SAT_CONF[sat];
-  return col
-    .map((i: any) => {
-      if (cfg.mask) i = cfg.mask(i);
-      if (cfg.rescale) i = cfg.rescale(i);
-      const [nir, redSwir] = cfg.bands[index];
-      const idx = i.normalizedDifference([nir, redSwir]).rename(index);
-      return idx.copyProperties(i, ['system:time_start']);
-    })
-    .select(index);
-}
-
-
-
 function getImageCollection(ee: any, sat: string, index: 'NDVI' | 'NBR') {
   const cfg = SAT_CONF[sat];
   if (!cfg) throw new Error(`Satellite ${sat} not supported`);
@@ -239,169 +191,6 @@ export async function getTimeSeriesData(params: TimeSeriesParams): Promise<TimeS
   }));
 }
 
-// ----------  Severity trajectory  ----------
-export async function getSeverityTrajectory(p: SeverityParams) {
-  const ee = await getEE();
-  const sat = normalizeSatelliteLabel(p.satellite);
-  const geom = ee.Geometry(p.geometry);
-
-  const start = ee.Date(p.fireDate).advance(-p.windowSize, 'day');
-  const end = ee.Date(Date.now());
-
-  const seq = ee.List.sequence(start.millis(), end.millis(), p.windowSize * 24 * 3600 * 1000)
-    .map((m: any) => ee.Date(m));
-
-  const col = getImageCollection(ee, sat, p.index).filterBounds(geom);
-  const scale = getScaleForSatellite(sat);
-
-  const bands = ee.List.sequence(0, seq.length().subtract(2)).map(i => {
-    const ini = ee.Date(seq.get(i));
-    const fin = ee.Date(seq.get(ee.Number(i).add(1)));
-    const med = col.filterDate(ini, fin).median().reduceRegion({
-      reducer: ee.Reducer.median(), geometry: geom, scale, maxPixels: 1e13
-    }).get(p.index);
-    return med;
-  });
-
-  const values: (number | null)[] = await evaluate(bands);
-  const base = values[0];
-  const deltas = values.map(v => v != null && base != null ? v - base : null);
-  const days = Array.from({ length: deltas.length }, (_, i) => (i + 1) * p.windowSize);
-
-  return { days, deltas };
-}
-
-// ----------  Severity maps  ----------
-export async function generateSeverityMaps(args: {
-  satellite: string;
-  geometry: GeoJSON.Geometry;
-
-  preStart: string;
-  preEnd: string;
-  postStart: string;
-  postEnd: string;
-
-  cloudCoverMax?: number;
-
-  applySegmentation?: boolean;
-
-  /*— parâmetros de segmentação (todos opcionais) */
-  segmKernel?: number;
-  segmDnbrThresh?: number;
-  segmCvaThresh?: number;
-  segmMinPix?: number;
-}) {
-
-  const ee = await getEE();
-  const sat = normalizeSatelliteLabel(args.satellite);
-  const geom = ee.Geometry(args.geometry);
-
-  const col = buildCollection(
-    ee, sat, 'NBR', geom, args.cloudCoverMax
-  );
-  const preCol = col.filterDate(args.preStart, args.preEnd);
-  const postCol = col.filterDate(args.postStart, args.postEnd);
-
-  /* ───── Avaliar tamanho das colecções ───── */
-  const [preCount, postCount] = await Promise.all([
-    evaluate<number>(preCol.size()),
-    evaluate<number>(postCol.size())
-  ]);
-
-  if (preCount === 0)
-    throw new Error(
-      `Não há imagens ${sat} no intervalo pré-fogo: ${args.preStart} – ${args.preEnd}`
-    );
-
-  if (postCount === 0)
-    throw new Error(
-      `Não há imagens ${sat} no intervalo pós-fogo: ${args.postStart} – ${args.postEnd}`
-    );
-
-  /* ---------- resto do algoritmo mantém-se ---------- */
-  const pre = preCol.median();
-  const post = postCol.median();
-  const dNBR = pre.subtract(post).rename('dNBR').clip(geom);
-  const rdNBR = dNBR.divide(pre.sqrt()).rename('rdNBR').clip(geom);
-  const rbr = dNBR.divide(pre.add(1.001)).rename('rbr').clip(geom);
-  const classified = dNBR
-    .where(dNBR.lte(0.1), 1)
-    .where(dNBR.gt(0.1).and(dNBR.lte(0.27)), 2)
-    .where(dNBR.gt(0.27).and(dNBR.lte(0.44)), 3)
-    .where(dNBR.gt(0.44).and(dNBR.lte(0.66)), 4)
-    .where(dNBR.gt(0.66), 5)
-    .clip(geom)
-    .rename('severity')
-    .toInt16();
-
-  return { deltaNBR: dNBR, rdNBR, rbr, classified };
-}
-
-
-/* ------------------------------------------------------------------ *
- * 6. FUNÇÕES AUXILIARES (fetchBurnedAreaLayer, getSeverityMap, …)
- * ------------------------------------------------------------------ */
-
-export async function fetchBurnedAreaLayer(dataset: 'ICNF' | 'EFFIS', year: number) {
-  const res = await fetch('/api/gee/burned-areas', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ dataset, year })
-  });
-  if (!res.ok) throw new Error('Failed to fetch burned area layer');
-  return res.json();
-}
-
-// Helper to call severity API from frontend
-export async function loadSeverityChart(
-  satellite: string,
-  index: 'NDVI' | 'NBR',
-  fireDate: string,
-  windowSize: number,
-  geometry: GeoJSON.Geometry
-): Promise<{ days: number[]; deltas: (number | null)[] } | null> {
-  try {
-    // Não normaliza aqui porque presumimos que a API vai normalizar
-    const res = await fetch('/api/gee/severity', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ satellite, index, fireDate, windowSize, geometry })
-    });
-
-    if (!res.ok) throw new Error('Failed to fetch severity data');
-
-    const { data } = await res.json();
-    return data;
-  } catch (err) {
-    console.error('Error in loadSeverityChart:', err);
-    return null;
-  }
-}
-
-export async function getSeverityMap(lat: number, lon: number, dataset: string, year: number) {
-  try {
-    const response = await fetch(`/api/gee/severity-maps?lat=${lat}&lon=${lon}&dataset=${dataset}&year=${year}`);
-
-    if (!response.ok) {
-      throw new Error('Erro ao buscar mapa de severidade');
-    }
-
-    const data = await response.json();
-
-    return {
-      tileUrl: data.tileUrl,
-      bounds: {
-        south: data.bounds.south,
-        west: data.bounds.west,
-        north: data.bounds.north,
-        east: data.bounds.east
-      }
-    };
-  } catch (error) {
-    console.error('Erro na função getSeverityMap:', error);
-    throw error;
-  }
-}
 /* ───────────────── Sentinel-2: escala só as bandas ópticas que existirem ───────────────── */
 /* reflectâncias Sentinel-2 L2A */
 const S2_BANDS = ['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B11', 'B12'];
