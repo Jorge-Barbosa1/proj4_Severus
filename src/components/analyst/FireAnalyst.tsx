@@ -110,18 +110,18 @@ function FireAnalyst({
     <>
       <div className="analysis-tools">
         <button
-          className="action-button"
+          className="action-button primary"
           onClick={plotTimeSeries}
           disabled={isLoading}
         >
-          📈 Gerar gráfico
+          {isLoading ? 'Running...' : 'Plot time series'}
         </button>
         <button
-          className="action-button"
+          className="action-button secondary"
           onClick={calculateSeverity}
           disabled={isLoading}
         >
-          🔥 Calcular severidade
+          {isLoading ? 'Running...' : 'Calculate severity'}
         </button>
       </div>
 
@@ -142,32 +142,46 @@ function FireAnalyst({
         .analysis-tools {
           display: flex;
           flex-direction: column;
-          gap: 10px;
-          margin-bottom: 20px;
+          gap: 8px;
+          margin-top: 12px;
         }
 
         .action-button {
-          padding: 10px;
-          border: none;
-          border-radius: 5px;
-          background: linear-gradient(90deg, #ff8c00, #ffc107);
-          color: white;
-          font-weight: 500;
+          padding: 10px 14px;
+          border-radius: 8px;
+          font-weight: 600;
+          font-size: 0.9rem;
           cursor: pointer;
-          transition: all 0.2s ease;
-          box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+          transition: background-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
         }
 
-        .action-button:hover:not(:disabled) {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        .action-button.primary {
+          background: #f97316;
+          color: #0b1220;
+          border: 1px solid #f97316;
+        }
+
+        .action-button.primary:hover:not(:disabled) {
+          background: #ea580c;
+          transform: translateY(-1px);
+        }
+
+        .action-button.secondary {
+          background: transparent;
+          color: #f1f5f9;
+          border: 1px solid #334155;
+        }
+
+        .action-button.secondary:hover:not(:disabled) {
+          background: #1e293b;
+          border-color: #475569;
         }
 
         .action-button:disabled {
-          background: #e0e0e0;
-          color: #777;
+          opacity: 0.55;
           cursor: not-allowed;
-          box-shadow: none;
+          transform: none;
         }
       `}</style>
     </>

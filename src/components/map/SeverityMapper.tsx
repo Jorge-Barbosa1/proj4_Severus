@@ -114,97 +114,78 @@ function SeverityMapper({
 
   return (
     <div className="severity-mapper">
-      {loading && <p>A processar… ⏳</p>}
-
-      {finished && <p className="success">✅ Mapas gerados com sucesso</p>}
-
+      {loading && <p className="status-line">Processing...</p>}
+      {finished && <p className="success">Maps generated</p>}
       {error && <p className="error">{error}</p>}
 
       {!geometry ? (
         <div className="info-message">
-          <p>Selecione uma área queimada no mapa para gerar o mapa de severidade.</p>
+          Select a burned area on the map to generate the severity map.
         </div>
       ) : (
         <div className="selected-area-message">
-          <p>✓ Área queimada selecionada</p>
+          <span>Burned area selected</span>
           <button
-            className="action-button generate-button"
+            className="action-button"
             onClick={generateSeverityMap}
             disabled={loading}
           >
-            Gerar Mapa de Severidade
+            {loading ? 'Generating...' : 'Generate severity map'}
           </button>
         </div>
       )}
 
       <style>{`
+        .severity-mapper { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+
         .action-button {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
           width: 100%;
-          padding: 14px;
-          border-radius: 4px;
-          border: none;
-          background: linear-gradient(90deg, #FF6B35, #F7931E);
-          color: white;
+          padding: 11px 14px;
+          border-radius: 8px;
+          border: 1px solid #f97316;
+          background: #f97316;
+          color: #0b1220;
           font-family: inherit;
-          font-size: 0.95rem;
-          font-weight: 500;
+          font-size: 0.9rem;
+          font-weight: 600;
           cursor: pointer;
-          transition: all 0.3s;
-          box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+          transition: background-color 180ms ease, transform 180ms ease;
+          box-shadow: 0 1px 2px rgba(0,0,0,0.25);
         }
 
         .action-button:hover:not(:disabled) {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+          background: #ea580c;
+          transform: translateY(-1px);
         }
 
-        .action-button:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-          transform: none;
-        }
-
-        .generate-button {
-          margin-top: 0.5rem;
-        }
+        .action-button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 
         .info-message {
-          background-color: rgba(92, 124, 250, 0.1);
-          border-left: 3px solid #5C7CFA;
-          padding: 12px;
-          border-radius: 4px;
-          margin-bottom: 16px;
+          background: rgba(56,189,248,0.08);
+          color: #38bdf8;
+          border: 1px solid rgba(56,189,248,0.25);
+          padding: 10px 12px;
+          border-radius: 8px;
+          font-size: 0.82rem;
+          line-height: 1.4;
         }
 
         .selected-area-message {
-          background-color: rgba(32, 201, 151, 0.1);
-          border-left: 3px solid #20C997;
-          padding: 12px;
-          border-radius: 4px;
-          margin-bottom: 16px;
           display: flex;
           flex-direction: column;
-          gap: 12px;
-        }
-
-        .selected-area-message p {
-          font-weight: 500;
-          margin: 0;
-        }
-
-        .success {
-          color: #20C997;
+          gap: 10px;
+          padding: 10px 12px;
+          background: rgba(16,185,129,0.08);
+          border: 1px solid rgba(16,185,129,0.25);
+          border-radius: 8px;
+          color: #10b981;
+          font-size: 0.82rem;
           font-weight: 500;
         }
 
-        .error {
-          color: #FF6B6B;
-          font-weight: 500;
-        }
+        .status-line { color: #94a3b8; font-size: 0.82rem; }
+        .success { color: #10b981; font-weight: 500; font-size: 0.82rem; }
+        .error { color: #ef4444; font-weight: 500; font-size: 0.82rem; }
       `}</style>
     </div>
   );
