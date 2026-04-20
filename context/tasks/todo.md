@@ -599,4 +599,62 @@ npm start              # Start Express server with tsx
 - [x] Added FIRMS status and test actions in UI
 - [x] Added live FIRMS hotspot rendering on map with popup details
 - [x] Moved old burned-area dataset section into optional advanced controls
-- [ ] Next: mobile-first responsive pass (SO-3)
+
+---
+
+## April 20, 2026 — Phase SO-7: Public data-source integration
+
+**Goal**: Replace private `users/joaofgo/...` GEE dependency with public, daily-updated sources so the app is fully functional with data the user doesn't control.
+
+### Completed
+- [x] `src/api/routes/fogos.js` — ANEPC active occurrences via `api.fogos.pt/new/fires`
+  - `GET /api/fogos/status` and `GET /api/fogos/active?onlyActive=&onlyFires=`
+  - 2-min cache, no API key needed
+  - Returns GeoJSON FeatureCollection with natureza/status/meios meta
+- [x] `src/api/routes/gee.js` extended — `GET /api/gee/globfire?from=&to=&mode=daily|final`
+  - Default `mode=daily` (per-year `JRC/GWIS/GlobFire/v2/DailyPerimeters/YYYY` tables; merged)
+  - `mode=final` stays available but has degenerate geometries (see lessons.md #8)
+- [x] ~~`src/api/routes/effis.js`~~ — REMOVED 2026-04-20. EFFIS public WFS is dead:
+  - `maps.effis.emergency.copernicus.eu/effis` → 403/timeout
+  - `ies-ows.jrc.ec.europa.eu/effis` → 200 on Capabilities but Oracle backend
+    connection is broken (`msOracleSpatialLayerOpen(): OracleSpatial error`)
+  - `gwis.jrc.ec.europa.eu/geoserver/wfs` → 404
+  - Decision: drop EFFIS from the UI/backend entirely; revisit with MCD64A1 on GEE
+    if a "months-fresh" burned-area layer is needed later
+- [x] `server.js` wires new router at `/api/fogos`
+- [x] `src/components/map/Map.tsx` — `addHotspotsLayer(id, geojson, style?)` now accepts optional
+      `HotspotStyle { fillColor, color, radius, fillOpacity, popupBuilder }`
+- [x] `src/pages/Home.tsx` — two new sidebar cards:
+  - "ANEPC · fogos.pt" (live Civil Protection occurrences, orange markers)
+  - "Áreas ardidas · GlobFire" (date range + single button, red polygons, 2001-2021 only)
+- [x] Smoke-tested live: fogos.pt ✓, GlobFire daily ✓ (tested 2020-2021, 960/287 PT perimeters)
+- [x] Empirically verified GlobFire ceiling: 2021 is the last published year on GEE
+      (2022+ `FeatureCollection` construction errors). Asset version timestamp
+      = 2022-03-18, i.e. the mirror has been frozen for ~4 years.
+
+### Freshness matrix (post-SO-7)
+| Layer                 | Source                | Refresh           | Status |
+|-----------------------|-----------------------|-------------------|--------|
+| Active occurrences    | fogos.pt (ANEPC)      | ~2 min            | ✅     |
+| Thermal hotspots      | NASA FIRMS            | ~3 h              | ✅     |
+| Recent burned areas   | **MODIS MCD64A1 (GEE)** | monthly, ~2 mo lag | ✅     |
+| Historical perimeters | ~~GEE GlobFire~~      | —                 | ❌ removed (frozen at 2021) |
+| Recent perimeters     | ~~EFFIS WFS~~         | —                 | ❌ removed (hosts dead) |
+
+### Decisions made 2026-04-20
+- **GlobFire dropped**: GEE mirror was last updated March 2022, covering only up to
+  fire season 2021. Not acceptable for a "most up-to-date" app. Route, UI card and
+  state removed. Replaced with MCD64A1.
+- **MCD64A1 integrated**: `GET /api/gee/modis-burned-areas?from=&to=` returns a
+  Leaflet-ready tile URL plus the collection's actual coverage window so the UI
+  can tell the user what's really available. Verified: 304 images from 2000-11-01
+  to 2026-02-01 (i.e. ~2 month lag at the time of writing).
+- **FIRMS**: user flagged as redundant vs fogos.pt; kept for now pending confirmation.
+  FIRMS detects thermal anomalies globally without any ground reporting, which is
+  complementary to fogos.pt (human/ANEPC-reported PT-only).
+
+### Open / next
+- [ ] Confirm FIRMS removal or demote to advanced section
+- [ ] Mobile-first responsive pass (SO-3)
+- [ ] Loading spinners + toast feedback for the new cards (currently text-only notes)
+- [ ] Auto-refresh fogos.pt layer on the map every 2 min when the card is active
