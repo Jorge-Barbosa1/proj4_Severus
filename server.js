@@ -6,6 +6,7 @@ import chatRouter from './src/api/routes/chat.js';
 import ragRouter from './src/api/routes/rag.js';
 import geeRouter from './src/api/routes/gee.js';
 import firmsRouter from './src/api/routes/firms.js';
+import fogosRouter from './src/api/routes/fogos.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,6 +23,7 @@ app.use('/api/chat', chatRouter);
 app.use('/api/rag', ragRouter);
 app.use('/api/gee', geeRouter);
 app.use('/api/firms', firmsRouter);
+app.use('/api/fogos', fogosRouter);
 
 // Serve React static files
 app.use(express.static(path.join(__dirname, 'dist')));
