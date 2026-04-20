@@ -137,6 +137,23 @@ function Home() {
   const [firmsMessage, setFirmsMessage] = useState('');
   const [liveHotspotsCount, setLiveHotspotsCount] = useState<number>(0);
 
+  // ANEPC / fogos.pt
+  const [fogosLoading, setFogosLoading] = useState(false);
+  const [fogosMessage, setFogosMessage] = useState('');
+  const [fogosCount, setFogosCount] = useState(0);
+
+  // Burned areas — MODIS MCD64A1 (monthly, ~1-2 month lag).
+  // Defaults target the last completed Portuguese fire season (Jun-Sep of previous year)
+  // so the user sees data on first click instead of empty winter months.
+  const lastFireSeasonYear = new Date().getFullYear() - 1;
+  const [baFrom, setBaFrom] = useState(`${lastFireSeasonYear}-06-01`);
+  const [baTo, setBaTo] = useState(`${lastFireSeasonYear}-09-30`);
+  const [baLoading, setBaLoading] = useState(false);
+  const [baMessage, setBaMessage] = useState('');
+  const [baMessageTone, setBaMessageTone] = useState<'ok' | 'warn' | 'info'>('info');
+  const [baCount, setBaCount] = useState(0);
+  const [baCoverage, setBaCoverage] = useState<{ earliest: string; latest: string } | null>(null);
+
   // Analyst dates
   const [fireDate, setFireDate] = useState('');
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
@@ -236,6 +253,98 @@ function Home() {
     setFirmsMessage('Live hotspots removed from map.');
   };
 
+  const loadActiveFogos = async () => {
+    setFogosLoading(true);
+    setFogosMessage('A carregar ocorrências ANEPC...');
+    try {
+      const res = await fetch('/api/fogos/active?onlyActive=true&onlyFires=true');
+      const data = await res.json();
+      if (!res.ok) {
+        setFogosMessage(data.error || 'Não foi possível carregar ocorrências.');
+        return;
+      }
+      await mapComponentRef.current?.addHotspotsLayer('fogos-active', data.geojson, {
+        fillColor: '#f97316',
+        color: '#9a3412',
+        radius: 8,
+        fillOpacity: 0.85,
+        popupBuilder: (p: any) => `
+          <div style="min-width: 240px;">
+            <strong>🔥 ${p.natureza ?? 'Ocorrência'}</strong><br/>
+            <strong>Local:</strong> ${p.location ?? '—'}<br/>
+            <strong>Estado:</strong> <span style="color:#${p.statusColor ?? '666'}">${p.status ?? '—'}</span><br/>
+            <strong>Início:</strong> ${p.datetime ?? '—'}<br/>
+            <strong>Meios:</strong> 👤 ${p.man} • 🚒 ${p.terrain} • ✈️ ${p.aerial}<br/>
+            <strong>Fonte:</strong> ANEPC (fogos.pt)
+          </div>
+        `,
+      });
+      setFogosCount(data.count ?? 0);
+      setFogosMessage(`${data.count ?? 0} ocorrências ativas carregadas (de ${data.totalItems ?? 0} totais).`);
+    } catch (err) {
+      console.error(err);
+      setFogosMessage('Erro de rede ao carregar ocorrências ANEPC.');
+    } finally {
+      setFogosLoading(false);
+    }
+  };
+
+  const clearFogos = () => {
+    mapComponentRef.current?.removeHotspotsLayer('fogos-active');
+    setFogosCount(0);
+    setFogosMessage('Ocorrências ANEPC removidas.');
+  };
+
+  const loadModisBurned = async () => {
+    setBaLoading(true);
+    setBaMessageTone('info');
+    setBaMessage('A carregar áreas ardidas MODIS...');
+    try {
+      const url = `/api/gee/modis-burned-areas?from=${baFrom}&to=${baTo}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!res.ok) {
+        setBaMessageTone('warn');
+        setBaMessage(data.message || data.error || 'Erro no MCD64A1.');
+        return;
+      }
+      if (data.coverage) setBaCoverage(data.coverage);
+      if (!data.tileUrl) {
+        setBaMessageTone('warn');
+        setBaMessage(data.note || 'Sem imagens nesta janela.');
+        return;
+      }
+      if ((data.burnedPixelCount ?? 0) === 0) {
+        // API did return a tile but it will be fully transparent — tell the user why.
+        mapComponentRef.current?.removeTileLayer('modis-burned');
+        setBaCount(0);
+        setBaMessageTone('warn');
+        setBaMessage(
+          `0 pixéis ardidos em Portugal entre ${baFrom} e ${baTo}. Experimenta Jun–Set de um ano recente (época de fogos).`
+        );
+        return;
+      }
+      await mapComponentRef.current?.addTileLayer('modis-burned', data.tileUrl, { opacity: 0.75 });
+      setBaCount(data.burnedPixelCount);
+      setBaMessageTone('ok');
+      setBaMessage(
+        `MODIS MCD64A1: ~${data.approxBurnedKm2 ?? '?'} km² ardidos (${data.burnedPixelCount} pixéis) em ${data.matchedImages ?? 0} meses. Último disponível: ${data.coverage?.latest ?? '—'}.`
+      );
+    } catch (err) {
+      console.error(err);
+      setBaMessageTone('warn');
+      setBaMessage('Erro de rede no MCD64A1.');
+    } finally {
+      setBaLoading(false);
+    }
+  };
+
+  const clearBurnedAreas = () => {
+    mapComponentRef.current?.removeTileLayer('modis-burned');
+    setBaCount(0);
+    setBaMessage('Áreas ardidas removidas.');
+  };
+
   useEffect(() => {
     checkFirmsStatus();
   }, []);
@@ -307,6 +416,64 @@ function Home() {
               <div style={dyn.note(firmsConfigured ? 'info' : 'warn')}>
                 {firmsMessage}
               </div>
+            )}
+          </div>
+
+          <div style={s.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
+              <div style={s.cardTitle}>ANEPC · fogos.pt</div>
+              <span style={{ fontSize: '0.7rem', color: color.textFaint }}>
+                ativas: {fogosCount}
+              </span>
+            </div>
+            <div style={{ ...s.hint, marginBottom: space(3) }}>
+              Ocorrências oficiais da Proteção Civil (atualização ~2 min).
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
+              <button onClick={loadActiveFogos} disabled={fogosLoading} style={s.btnSecondary}>
+                Mostrar ocorrências
+              </button>
+              <button onClick={clearFogos} style={s.btnGhost}>
+                Limpar
+              </button>
+            </div>
+            {fogosMessage && (
+              <div style={dyn.note('info')}>{fogosMessage}</div>
+            )}
+          </div>
+
+          <div style={s.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
+              <div style={s.cardTitle}>Áreas ardidas · MODIS</div>
+              <span style={{ fontSize: '0.7rem', color: color.textFaint }}>
+                pixéis: {baCount}
+              </span>
+            </div>
+            <div style={{ ...s.hint, marginBottom: space(3) }}>
+              NASA MODIS MCD64A1 (500 m, mensal). {baCoverage
+                ? <>Cobertura real: <strong>{baCoverage.earliest}</strong> → <strong>{baCoverage.latest}</strong>.</>
+                : 'Atualizado mensalmente, ~1–2 meses de atraso.'}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
+              <div>
+                <label style={s.label}>De</label>
+                <input type="date" value={baFrom} onChange={(e) => setBaFrom(e.target.value)} />
+              </div>
+              <div>
+                <label style={s.label}>Até</label>
+                <input type="date" value={baTo} onChange={(e) => setBaTo(e.target.value)} />
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
+              <button onClick={loadModisBurned} disabled={baLoading} style={s.btnSecondary}>
+                Mostrar áreas ardidas
+              </button>
+              <button onClick={clearBurnedAreas} style={s.btnGhost}>
+                Limpar
+              </button>
+            </div>
+            {baMessage && (
+              <div style={dyn.note(baMessageTone)}>{baMessage}</div>
             )}
           </div>
 
