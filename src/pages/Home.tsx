@@ -298,7 +298,7 @@ function Home() {
   const loadModisBurned = async () => {
     setBaLoading(true);
     setBaMessageTone('info');
-    setBaMessage('A carregar áreas ardidas MODIS...');
+    setBaMessage('A vectorizar áreas ardidas MODIS (pode demorar alguns segundos)...');
     try {
       const url = `/api/gee/modis-burned-areas?from=${baFrom}&to=${baTo}`;
       const res = await fetch(url);
@@ -309,26 +309,24 @@ function Home() {
         return;
       }
       if (data.coverage) setBaCoverage(data.coverage);
-      if (!data.tileUrl) {
-        setBaMessageTone('warn');
-        setBaMessage(data.note || 'Sem imagens nesta janela.');
-        return;
-      }
-      if ((data.burnedPixelCount ?? 0) === 0) {
-        // API did return a tile but it will be fully transparent — tell the user why.
-        mapComponentRef.current?.removeTileLayer('modis-burned');
+      if (!data.geojson || data.count === 0) {
+        mapComponentRef.current?.removeBurnedAreaLayer('modis-burned');
         setBaCount(0);
         setBaMessageTone('warn');
         setBaMessage(
-          `0 pixéis ardidos em Portugal entre ${baFrom} e ${baTo}. Experimenta Jun–Set de um ano recente (época de fogos).`
+          data.note ||
+            `0 patches ardidos em Portugal entre ${baFrom} e ${baTo}. Experimenta Jun–Set de um ano recente.`
         );
         return;
       }
-      await mapComponentRef.current?.addTileLayer('modis-burned', data.tileUrl, { opacity: 0.75 });
-      setBaCount(data.burnedPixelCount);
+      await mapComponentRef.current?.addBurnedAreaLayer('modis-burned', data.geojson, {
+        color: '#dc2626',
+        fillOpacity: 0.35,
+      });
+      setBaCount(data.count);
       setBaMessageTone('ok');
       setBaMessage(
-        `MODIS MCD64A1: ~${data.approxBurnedKm2 ?? '?'} km² ardidos (${data.burnedPixelCount} pixéis) em ${data.matchedImages ?? 0} meses. Último disponível: ${data.coverage?.latest ?? '—'}.`
+        `${data.count} áreas ardidas · ~${data.totalBurnedKm2 ?? 0} km² no total (${baFrom} → ${baTo}). Último disponível: ${data.coverage?.latest ?? '—'}. Clica num polígono para detalhes.`
       );
     } catch (err) {
       console.error(err);
@@ -340,7 +338,7 @@ function Home() {
   };
 
   const clearBurnedAreas = () => {
-    mapComponentRef.current?.removeTileLayer('modis-burned');
+    mapComponentRef.current?.removeBurnedAreaLayer('modis-burned');
     setBaCount(0);
     setBaMessage('Áreas ardidas removidas.');
   };
@@ -446,7 +444,7 @@ function Home() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
               <div style={s.cardTitle}>Áreas ardidas · MODIS</div>
               <span style={{ fontSize: '0.7rem', color: color.textFaint }}>
-                pixéis: {baCount}
+                áreas: {baCount}
               </span>
             </div>
             <div style={{ ...s.hint, marginBottom: space(3) }}>

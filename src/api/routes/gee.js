@@ -13,13 +13,17 @@ const PT_BBOX = [-10.0, 36.8, -6.0, 42.3]; // [minLon, minLat, maxLon, maxLat]
 const MCD64A1_ASSET = 'MODIS/061/MCD64A1';
 
 // GET /api/gee/modis-burned-areas
-// Returns a Leaflet-ready tile URL for MODIS MCD64A1 BurnDate rendered as a color ramp,
-// plus the asset's real coverage so the UI can clamp user-entered dates.
-// Query: from=YYYY-MM-DD, to=YYYY-MM-DD
+// Returns clickable GeoJSON polygons vectorised from MODIS MCD64A1 BurnDate
+// for the requested window, clipped to Portugal. Each polygon has:
+//   - fire_date (YYYY-MM-DD) derived from the pixel's BurnDate + image year
+//   - area_ha (integer hectares)
+// Small patches below `minAreaHa` are dropped to cut MODIS noise.
+// Query: from=YYYY-MM-DD, to=YYYY-MM-DD, minAreaHa=<number, default 100>
 router.get('/modis-burned-areas', async (req, res) => {
   try {
     const from = String(req.query.from || '').trim();
     const to = String(req.query.to || '').trim();
+    const minAreaHa = Math.max(0, parseFloat(String(req.query.minAreaHa || '100')) || 100);
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
       return res.status(400).json({
@@ -31,7 +35,7 @@ router.get('/modis-burned-areas', async (req, res) => {
     const region = ee.Geometry.Rectangle(PT_BBOX);
     const ic = ee.ImageCollection(MCD64A1_ASSET);
 
-    // Coverage window of the collection itself (so the UI can tell users what's actually available)
+    // Coverage window of the collection itself so the UI can show users what is really available.
     const [latestDate, earliestDate] = await Promise.all([
       new Promise((r, j) =>
         ee
@@ -47,8 +51,7 @@ router.get('/modis-burned-areas', async (req, res) => {
       ),
     ]);
 
-    // Apply requested window, clipped to Portugal
-    const filtered = ic.filterDate(from, to).filterBounds(region).select('BurnDate');
+    const filtered = ic.filterDate(from, to).filterBounds(region);
 
     const matchedCount = await new Promise((r, j) =>
       filtered.size().evaluate((v, e) => (e ? j(e) : r(v))),
@@ -61,52 +64,83 @@ router.get('/modis-burned-areas', async (req, res) => {
         to,
         coverage: { earliest: earliestDate, latest: latestDate },
         matchedImages: 0,
-        tileUrl: null,
-        note:
-          `MCD64A1 has no images in this window. Latest available month is ${latestDate}.`,
+        count: 0,
+        geojson: { type: 'FeatureCollection', features: [] },
+        note: `MCD64A1 has no images in this window. Latest available month is ${latestDate}.`,
       });
     }
 
-    const mosaic = filtered.mosaic();
-    const burned = mosaic.selfMask();
+    // Encode absBurn = year*1000 + BurnDate(DOY) so downstream vectorisation can
+    // recover the real calendar date regardless of which monthly image a pixel came from.
+    const withAbsDate = filtered.map((img) => {
+      const year = ee.Date(img.get('system:time_start')).get('year');
+      const bd = img.select('BurnDate');
+      return bd
+        .add(year.multiply(1000))
+        .updateMask(bd.gt(0))
+        .rename('absBurn')
+        .toInt32();
+    });
 
-    // Count burned pixels in PT so the UI can warn the user if the window is empty
-    // (e.g. winter months where nothing burned).
-    const burnedPixelCount = await new Promise((resolve, reject) =>
-      mosaic
-        .gt(0)
-        .reduceRegion({
-          reducer: ee.Reducer.sum(),
-          geometry: region,
-          scale: 500,
-          maxPixels: 1e10,
-        })
-        .evaluate((v, e) => (e ? reject(e) : resolve(Math.round(v?.BurnDate ?? 0)))),
+    const mosaic = withAbsDate.mosaic();
+
+    // reduceToVectors with labelProperty=absBurn groups pixels of equal absBurn
+    // into polygons. Eight-connected so diagonal neighbours merge.
+    const polys = mosaic.reduceToVectors({
+      geometry: region,
+      scale: 500,
+      geometryType: 'polygon',
+      eightConnected: true,
+      labelProperty: 'absBurn',
+      maxPixels: 1e10,
+    });
+
+    const enriched = polys
+      .map((f) => {
+        const absBurn = ee.Number(f.get('absBurn'));
+        const year = absBurn.divide(1000).floor();
+        const doy = absBurn.mod(1000);
+        const date = ee.Date.fromYMD(year, 1, 1).advance(doy.subtract(1), 'day');
+        const areaHa = f.geometry().area(1).divide(10000);
+        return f.set({
+          fire_date: date.format('YYYY-MM-dd'),
+          area_ha: areaHa,
+        });
+      })
+      .filter(ee.Filter.gte('area_ha', minAreaHa));
+
+    const raw = await new Promise((resolve, reject) =>
+      enriched.getInfo((v, e) => (e ? reject(e) : resolve(v))),
     );
 
-    const visParams = {
-      min: 1,
-      max: 366,
-      palette: ['#ffeda0', '#feb24c', '#f03b20', '#bd0026'],
-    };
+    const features = (raw?.features || []).map((f) => {
+      const p = f.properties || {};
+      return {
+        type: 'Feature',
+        geometry: f.geometry,
+        properties: {
+          source_dataset: MCD64A1_ASSET,
+          fire_date: p.fire_date || null,
+          area_ha: typeof p.area_ha === 'number' ? Math.round(p.area_ha) : null,
+        },
+      };
+    });
 
-    const mapInfo = await new Promise((resolve, reject) =>
-      burned.getMap(visParams, (info, err) => (err ? reject(err) : resolve(info))),
-    );
+    const totalHa = features.reduce((s, f) => s + (f.properties.area_ha || 0), 0);
 
     res.json({
       source: 'MODIS/061/MCD64A1',
       from,
       to,
+      minAreaHa,
       coverage: { earliest: earliestDate, latest: latestDate },
       matchedImages: matchedCount,
-      burnedPixelCount,
-      // ~0.215 km^2 per MODIS 500m pixel (approximate, varies with latitude)
-      approxBurnedKm2: Math.round(burnedPixelCount * 0.215),
-      tileUrl: mapInfo.urlFormat,
-      mapid: mapInfo.mapid,
-      note: burnedPixelCount === 0
-        ? 'No burned pixels detected in Portugal for this window. Try a fire-season window (Jun–Sep).'
+      count: features.length,
+      totalBurnedHa: totalHa,
+      totalBurnedKm2: Math.round(totalHa / 100),
+      geojson: { type: 'FeatureCollection', features },
+      note: features.length === 0
+        ? `No burned patches above ${minAreaHa} ha in Portugal for this window. Try a fire-season window (Jun-Sep) or lower minAreaHa.`
         : undefined,
     });
   } catch (err) {
