@@ -2,10 +2,18 @@ import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 're
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
 
+export interface HotspotStyle {
+  fillColor?: string;
+  color?: string;
+  radius?: number;
+  fillOpacity?: number;
+  popupBuilder?: (properties: any) => string;
+}
+
 export interface MapHandle {
   addBurnedAreaLayer: (id: string, geojson: any, options: { color: string; fillOpacity: number }) => Promise<void>;
   removeBurnedAreaLayer: (id: string) => void;
-  addHotspotsLayer: (id: string, geojson: any) => Promise<void>;
+  addHotspotsLayer: (id: string, geojson: any, style?: HotspotStyle) => Promise<void>;
   removeHotspotsLayer: (id: string) => void;
   addTileLayer: (id: string, url: string, opts?: any) => Promise<void>;
   removeTileLayer: (id: string) => void;
@@ -157,7 +165,7 @@ const Map = forwardRef<MapHandle>((_props, ref) => {
       }
     },
 
-    addHotspotsLayer: async (id: string, geojson: any) => {
+    addHotspotsLayer: async (id: string, geojson: any, style?: HotspotStyle) => {
       if (!mapRef.current) return;
 
       const L = (window as any).L;
@@ -167,33 +175,37 @@ const Map = forwardRef<MapHandle>((_props, ref) => {
         delete hotspotLayersRef.current[id];
       }
 
+      const defaultBuilder = (p: any) => {
+        const confidence = p.confidence ?? 'n/a';
+        const frp = p.frp ?? 'n/a';
+        const datetime = p.datetime ?? p.acq_date ?? 'n/a';
+        const source = p.source_dataset ?? 'FIRMS';
+        return `
+          <div style="min-width: 220px;">
+            <strong>FIRMS hotspot</strong><br/>
+            <strong>Date/Time:</strong> ${datetime}<br/>
+            <strong>Confidence:</strong> ${confidence}<br/>
+            <strong>FRP:</strong> ${frp}<br/>
+            <strong>Dataset:</strong> ${source}
+          </div>
+        `;
+      };
+
+      const popupBuilder = style?.popupBuilder ?? defaultBuilder;
+
       const hotspotLayer = L.geoJSON(geojson, {
         pointToLayer: (_feature: any, latlng: any) => {
           return L.circleMarker(latlng, {
-            radius: 6,
-            fillColor: '#ef4444',
-            color: '#991b1b',
+            radius: style?.radius ?? 6,
+            fillColor: style?.fillColor ?? '#ef4444',
+            color: style?.color ?? '#991b1b',
             weight: 1,
             opacity: 1,
-            fillOpacity: 0.8,
+            fillOpacity: style?.fillOpacity ?? 0.8,
           });
         },
         onEachFeature: (feature: any, layer: any) => {
-          const p = feature.properties ?? {};
-          const confidence = p.confidence ?? 'n/a';
-          const frp = p.frp ?? 'n/a';
-          const datetime = p.datetime ?? p.acq_date ?? 'n/a';
-          const source = p.source_dataset ?? 'FIRMS';
-
-          layer.bindPopup(`
-            <div style="min-width: 220px;">
-              <strong>FIRMS hotspot</strong><br/>
-              <strong>Date/Time:</strong> ${datetime}<br/>
-              <strong>Confidence:</strong> ${confidence}<br/>
-              <strong>FRP:</strong> ${frp}<br/>
-              <strong>Dataset:</strong> ${source}
-            </div>
-          `);
+          layer.bindPopup(popupBuilder(feature.properties ?? {}));
         },
       }).addTo(mapRef.current);
 
@@ -271,6 +283,10 @@ const Map = forwardRef<MapHandle>((_props, ref) => {
     const isBrowser = typeof window !== 'undefined';
     if (!isBrowser) return;
 
+    let cancelled = false;
+    let localMap: any = null;
+    let startDrawHandlerRef: ((evt: any) => void) | null = null;
+
     const initMap = async () => {
       // Load Leaflet dynamically
       const L = (await import('leaflet')).default;
@@ -279,8 +295,17 @@ const Map = forwardRef<MapHandle>((_props, ref) => {
       // Load leaflet-draw
       await import('leaflet-draw');
 
+      if (cancelled) return;
+
+      // Reset any pre-existing Leaflet binding on the container (StrictMode double-mount safety)
+      const container = document.getElementById('map') as (HTMLElement & { _leaflet_id?: number | null }) | null;
+      if (container?._leaflet_id != null) {
+        container._leaflet_id = null;
+      }
+
       // Create map
       const map = L.map('map').setView([39.5, -8], 7);
+      localMap = map;
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors',
       }).addTo(map);
@@ -396,7 +421,7 @@ const Map = forwardRef<MapHandle>((_props, ref) => {
       });
 
       // Listen for drawing requests
-      const startDrawHandler = (evt: any) => {
+      startDrawHandlerRef = (evt: any) => {
         const mode: 'burned' | 'polygon' | 'square' = evt.detail;
         clearDrawings();
 
@@ -432,16 +457,21 @@ const Map = forwardRef<MapHandle>((_props, ref) => {
         }
       };
 
-      document.addEventListener('startDraw', startDrawHandler);
-
-      // Cleanup
-      return () => {
-        document.removeEventListener('startDraw', startDrawHandler);
-        map.remove();
-      };
+      document.addEventListener('startDraw', startDrawHandlerRef);
     };
 
     initMap();
+
+    return () => {
+      cancelled = true;
+      if (startDrawHandlerRef) {
+        document.removeEventListener('startDraw', startDrawHandlerRef);
+      }
+      if (localMap) {
+        try { localMap.remove(); } catch { /* ignore */ }
+      }
+      mapRef.current = null;
+    };
   }, []);
 
   return (
