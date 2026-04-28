@@ -228,6 +228,14 @@ function Home() {
   const [baLoading, setBaLoading] = useState(false);
   const [baMessage, setBaMessage] = useState('');
   const [baMessageTone, setBaMessageTone] = useState<'ok' | 'warn' | 'info'>('info');
+
+  // ICNF burned areas (official PT, validated, 1975-2025)
+  const [icnfYears, setIcnfYears] = useState<string[]>([]);
+  const [icnfYear, setIcnfYear] = useState<string>(String(lastFireSeasonYear));
+  const [icnfLoading, setIcnfLoading] = useState(false);
+  const [icnfMessage, setIcnfMessage] = useState('');
+  const [icnfMessageTone, setIcnfMessageTone] = useState<'ok' | 'warn' | 'info'>('info');
+  const [icnfCount, setIcnfCount] = useState(0);
   const [baCount, setBaCount] = useState(0);
   const [baCoverage, setBaCoverage] = useState<{ earliest: string; latest: string } | null>(null);
 
@@ -388,6 +396,58 @@ function Home() {
     setBaMessage('Áreas ardidas removidas.');
   };
 
+  const loadIcnfYears = async () => {
+    try {
+      const res = await fetch('/api/icnf/years');
+      const data = await res.json();
+      if (Array.isArray(data.years)) setIcnfYears(data.years);
+    } catch (err) {
+      console.error('ICNF years load error:', err);
+    }
+  };
+
+  const loadIcnf = async () => {
+    setIcnfLoading(true);
+    setIcnfMessageTone('info');
+    setIcnfMessage(`A carregar áreas ardidas ICNF de ${icnfYear}...`);
+    try {
+      const res = await fetch(`/api/icnf/burned-areas?year=${encodeURIComponent(icnfYear)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setIcnfMessageTone('warn');
+        setIcnfMessage(data.error || 'Erro a carregar ICNF.');
+        return;
+      }
+      if (!data.geojson || data.count === 0) {
+        mapComponentRef.current?.removeBurnedAreaLayer('icnf-burned');
+        setIcnfCount(0);
+        setIcnfMessageTone('warn');
+        setIcnfMessage(`Sem registos ICNF para ${icnfYear}.`);
+        return;
+      }
+      await mapComponentRef.current?.addBurnedAreaLayer('icnf-burned', data.geojson, {
+        color: '#7c3aed',
+        fillOpacity: 0.4,
+      });
+      setIcnfCount(data.count);
+      setIcnfMessageTone('ok');
+      const cachedNote = data.cached ? ' (cache)' : '';
+      setIcnfMessage(`${data.count} polígonos validados em ${icnfYear}${cachedNote}. Clica num polígono para detalhes.`);
+    } catch (err) {
+      console.error(err);
+      setIcnfMessageTone('warn');
+      setIcnfMessage('Erro de rede ao carregar ICNF.');
+    } finally {
+      setIcnfLoading(false);
+    }
+  };
+
+  const clearIcnf = () => {
+    mapComponentRef.current?.removeBurnedAreaLayer('icnf-burned');
+    setIcnfCount(0);
+    setIcnfMessage('Áreas ICNF removidas.');
+  };
+
   const handleTimeSeriesReady = (points: SeriesPoint[]) => {
     setTimeSeries(points);
     setResultsOpen(true);
@@ -398,6 +458,7 @@ function Home() {
   };
 
   useEffect(() => { checkFirmsStatus(); }, []);
+  useEffect(() => { loadIcnfYears(); }, []);
 
   const hasResults = timeSeries.length > 0 || severity.length > 0;
 
@@ -426,7 +487,46 @@ function Home() {
 
       <div style={s.body}>
         <aside style={s.sidebar}>
-          {/* ANALYST — primary workflow */}
+          {/* 1. LIVE FIRES — primary */}
+          <div style={s.sectionLabel}>Fogos ao vivo</div>
+          <div style={s.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
+              <div style={s.cardTitle}>ANEPC · fogos.pt</div>
+              <span style={{ fontSize: '0.7rem', color: color.textFaint }}>ativas: {fogosCount}</span>
+            </div>
+            <div style={{ ...s.hint, marginBottom: space(3) }}>Ocorrências oficiais da Proteção Civil (~2 min).</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
+              <button onClick={loadActiveFogos} disabled={fogosLoading} style={s.btnSecondary}>Mostrar</button>
+              <button onClick={clearFogos} style={s.btnGhost}>Limpar</button>
+            </div>
+            {fogosMessage && <div style={dyn.note('info')}>{fogosMessage}</div>}
+          </div>
+
+          {/* 2. HISTORICAL PERIMETERS — primary */}
+          <div style={s.sectionLabel}>Áreas ardidas</div>
+          <div style={s.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
+              <div style={s.cardTitle}>ICNF (oficial)</div>
+              <span style={{ fontSize: '0.7rem', color: color.textFaint }}>polígonos: {icnfCount}</span>
+            </div>
+            <div style={{ ...s.hint, marginBottom: space(3) }}>
+              Perímetros validados em campo (1975-2025). Atualização anual.
+            </div>
+            <div style={{ marginBottom: space(2) }}>
+              <label style={s.label}>Ano</label>
+              <select value={icnfYear} onChange={(e) => setIcnfYear(e.target.value)} style={s.select}>
+                {icnfYears.length === 0 && <option value={icnfYear}>{icnfYear}</option>}
+                {icnfYears.map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
+              <button onClick={loadIcnf} disabled={icnfLoading} style={s.btnSecondary}>Mostrar</button>
+              <button onClick={clearIcnf} style={s.btnGhost}>Limpar</button>
+            </div>
+            {icnfMessage && <div style={dyn.note(icnfMessageTone)}>{icnfMessage}</div>}
+          </div>
+
+          {/* 3. ANALYSIS — primary workflow */}
           <div style={s.sectionLabel}>Análise</div>
           <div style={s.cardAnalyst}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: space(3) }}>
@@ -494,36 +594,8 @@ function Home() {
             )}
           </div>
 
-          {/* LIVE SOURCES */}
-          <div style={s.sectionLabel}>Fogos ao vivo</div>
-          <div style={s.card}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
-              <div style={s.cardTitle}>ANEPC · fogos.pt</div>
-              <span style={{ fontSize: '0.7rem', color: color.textFaint }}>ativas: {fogosCount}</span>
-            </div>
-            <div style={{ ...s.hint, marginBottom: space(3) }}>Ocorrências oficiais da Proteção Civil (~2 min).</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
-              <button onClick={loadActiveFogos} disabled={fogosLoading} style={s.btnSecondary}>Mostrar</button>
-              <button onClick={clearFogos} style={s.btnGhost}>Limpar</button>
-            </div>
-            {fogosMessage && <div style={dyn.note('info')}>{fogosMessage}</div>}
-          </div>
-
-          <div style={s.card}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
-              <div style={s.cardTitle}>NASA FIRMS</div>
-              <span style={{ fontSize: '0.7rem', color: color.textFaint }}>hotspots: {liveHotspotsCount}</span>
-            </div>
-            <div style={{ ...s.hint, marginBottom: space(3) }}>Deteções térmicas VIIRS (~3 h).</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
-              <button onClick={loadLiveHotspots} disabled={firmsLoading || !firmsConfigured} style={s.btnSecondary}>Mostrar</button>
-              <button onClick={clearLiveHotspots} style={s.btnGhost}>Limpar</button>
-            </div>
-            {firmsMessage && <div style={dyn.note(firmsConfigured ? 'info' : 'warn')}>{firmsMessage}</div>}
-          </div>
-
-          {/* HISTORICAL BURNED AREAS */}
-          <div style={s.sectionLabel}>Áreas ardidas</div>
+          {/* 4. AUXILIARY LAYERS — demoted */}
+          <div style={s.sectionLabel}>Camadas auxiliares</div>
           <div style={s.card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
               <div style={s.cardTitle}>MODIS MCD64A1</div>
@@ -547,6 +619,19 @@ function Home() {
               <button onClick={clearBurnedAreas} style={s.btnGhost}>Limpar</button>
             </div>
             {baMessage && <div style={dyn.note(baMessageTone)}>{baMessage}</div>}
+          </div>
+
+          <div style={s.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
+              <div style={s.cardTitle}>NASA FIRMS</div>
+              <span style={{ fontSize: '0.7rem', color: color.textFaint }}>hotspots: {liveHotspotsCount}</span>
+            </div>
+            <div style={{ ...s.hint, marginBottom: space(3) }}>Deteções térmicas VIIRS (~3 h). Complementar à ANEPC.</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
+              <button onClick={loadLiveHotspots} disabled={firmsLoading || !firmsConfigured} style={s.btnSecondary}>Mostrar</button>
+              <button onClick={clearLiveHotspots} style={s.btnGhost}>Limpar</button>
+            </div>
+            {firmsMessage && <div style={dyn.note(firmsConfigured ? 'info' : 'warn')}>{firmsMessage}</div>}
           </div>
         </aside>
 
