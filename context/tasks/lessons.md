@@ -98,6 +98,59 @@ This file tracks patterns, corrections, and learnings during the SvelteKit → R
 - **Lesson**: GEE catalog descriptions describe intent, not current reality. Always verify
   the latest available date of any "near real-time" dataset before wiring it into a UI.
 
+### 14. EFFIS bulk-download spike (2026-04-28) — no path to recent perimeters from this env
+
+Goal: replace João's `effis_all` GEE asset with a public, daily-fresh source.
+Time-boxed 2-3h spike. **Outcome: failed, pivot to ICNF + on-demand dNBR.**
+
+What was tried (PT environment, public IP, no API key):
+
+| Endpoint | Result |
+|---|---|
+| `data.effis.emergency.copernicus.eu/` (S3 bucket) | ✅ 200, listable. Contains CSVs of country totals, severity TIFFs, GLOBFIRE 3.3 GB zip dated 2025-03-07 (static). **No polygon perimeters.** |
+| `maps.effis.emergency.copernicus.eu/` (root) | ✅ 200 in 0.3s |
+| `maps.effis.emergency.copernicus.eu/effis?service=WFS&request=GetCapabilities` | ❌ 60s timeout with no bytes — backend hung, not a 403 this time |
+| `ies-ows.jrc.ec.europa.eu/effis?service=WFS&request=GetCapabilities` | ✅ 200, lists `ms:ercc.ba`, `ms:ercc.ba_24hrs_point`, `ms:ercc.hs_24hrs_point` |
+| `ies-ows.jrc.ec.europa.eu/effis?...DescribeFeatureType...` on `ercc.ba` | ❌ "Failed opening layer ercc.ba" |
+| `ies-ows.jrc.ec.europa.eu/effis?...GetFeature...` on all 3 fire layers | ❌ `msOracleSpatialLayerOpen(): OracleSpatial error. Cannot create OCI Handlers. Connection failure.` (same as #10, still broken 8 days later) |
+| `forest-fire.emergency.copernicus.eu/geoserver/{wfs,ows}` | ❌ 404 |
+| `api.effis.emergency.copernicus.eu/` | ❌ 404 root, no documented paths |
+| `gdacs.org/gdacsapi/api/events/geteventlist/MAP?eventlist=WF` | ✅ 200, returns GeoJSON, but **GDACS only tracks "major" events** (alert thresholds) and `eventlist=WF` filter is ignored — useless for typical PT fires |
+
+How the JS in `forest-fire.emergency.copernicus.eu/apps/effis_current_situation/static/js/app.bundle-2.9.1.js` references the data:
+- Bundle calls `https://maps.effis.emergency.copernicus.eu/effis` (the dead one) and `https://ies-ows.jrc.ec.europa.eu/effis` (Oracle-broken). I.e. the official viewer itself depends on the same broken hosts — this isn't an env-specific block, it's broken everywhere.
+
+**Conclusion:** there is no public bulk path to recent EFFIS burned-area perimeters today. The Oracle backend has been broken since at least 2026-04-20 (lessons #10) through 2026-04-28; this is not a transient. Revisit only if (a) Copernicus restores the Oracle backend, or (b) a new endpoint surfaces in the EFFIS viewer bundle.
+
+**Pivot decided 2026-04-28:** ICNF SNIG WFS for historical PT perimeters, on-demand Sentinel-2 dNBR vectorisation for "recent" perimeters. See todo.md Phase SO-8.
+
+### 15. ICNF — use the modern ArcGIS MapServer, not the stale WFS (2026-04-28)
+
+The instinctive entry point — `https://si.icnf.pt/geoserver` (advertised in `geocatalogo.icnf.pt/metadados/area_ardida.html`) — froze at 2018 and its metadata was last revised 2020-03-13. Layers `BDG:ardida_2009 … BDG:ardida_2018` plus aggregates `BDG:ardida_1990_1999` and `BDG:ardida_2000_2008`. Nothing newer.
+
+The currently-maintained source is the ArcGIS Online item `983c4e6c4d5b4666b258a3ad5f3ea5af` ("Territórios ardidos"), backed by **`https://sigservices.icnf.pt/server/rest/services/BDG/areas_ardidas/MapServer`**. As of this writing it covers **1975 → 2025** (yearly layers from 2009 onwards plus aggregates 1975-1989, 1990-1999, 2000-2008). Last `Edit_SGIF` timestamp on the 2024 layer was 2025-02-21.
+
+How to discover it without trial and error: query the ArcGIS portal item JSON directly — `GET https://sigservices.icnf.pt/portal/sharing/rest/content/items/{id}?f=json` returns the canonical service URL in its `url` field. Don't rely on the geocatalogo HTML — it points at the legacy WFS.
+
+Schema differences worth knowing (between the WFS and the MapServer):
+- WFS uses lowercase fields (`distrito`, `concelho`, `freguesia`, `dataalerta`).
+- MapServer uses ArcGIS-style names (`PI_Distrit`, `PI_Conc`, `PI_Freg`, `DH_Inicio` as ms-epoch).
+- Both expose `Cod_SGIF`/`cod_sgif` as the official fire ID.
+
+Layer-id mapping is non-sequential (ICNF created layers out of order) — capture it once and forget it: 2025→20, 2024→19, 2023→18, 2022→17, 2021→15, 2020→0, 2019→1, 2018→2, …, 2009→11, 2000_2008→12, 1990_1999→13, 1975_1989→14.
+
+### 16. ArcGIS MapServer 500s on dense-polygon batches — fix with `maxAllowableOffset` (2026-04-28)
+
+Symptom: paginating ICNF layer 3 (2017) with `resultRecordCount=500` returns 200 for offsets 0, 1500, 2000, 2500 but 500 for 500 and 1000. The error from ArcGIS is the unhelpful "Error performing query operation". Smaller batches (count=100) work everywhere, suggesting a single ultra-dense polygon in the 500-1499 window pushes the response past an internal serialisation limit.
+
+Two workable mitigations:
+- `resultRecordCount=100` and accept ~5× more roundtrips.
+- **Better:** add `maxAllowableOffset=0.0001` (in `outSR=4326` degrees ≈ 11 m at PT latitude). Server-side simplification both reduces payload (~60% smaller in our tests) and sidesteps the serialisation failure on dense polygons.
+
+Default in `src/api/routes/icnf.js` is the simplification path; `?precision=full` removes it for analytical use cases that need full vertex fidelity.
+
+**Lesson**: when an ArcGIS MapServer 500s on a specific offset window, suspect geometry density before suspecting pagination size. `maxAllowableOffset` is cheaper than splitting batches and gives smaller payloads as a bonus.
+
 ### 13. Prefer ImageCollection tiles over FeatureCollection polygons when the source is a raster
 - **Issue**: for burned-area maps the natural instinct was to fetch polygons and render via
   `L.geoJSON()`. For `MODIS/061/MCD64A1` that would mean vectorising with `reduceToVectors()` —

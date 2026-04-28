@@ -654,7 +654,49 @@ npm start              # Start Express server with tsx
   complementary to fogos.pt (human/ANEPC-reported PT-only).
 
 ### Open / next
-- [ ] Confirm FIRMS removal or demote to advanced section
+- [x] Confirm FIRMS removal or demote to advanced section → **demote** decided 2026-04-28 (SO-8)
 - [ ] Mobile-first responsive pass (SO-3)
 - [ ] Loading spinners + toast feedback for the new cards (currently text-only notes)
 - [ ] Auto-refresh fogos.pt layer on the map every 2 min when the card is active
+
+---
+
+## April 28, 2026 — Phase SO-8: Official PT perimeters (ICNF) + sidebar reorder
+
+**Goal**: replace João's `AA_ICNF_2000_2021_PT_v2` with a public, current-year-capable source, and surface the new flow as primary in the sidebar.
+
+### Pre-work
+- [x] EFFIS bulk-download spike (timeboxed 2-3h) → failed, see lessons.md #14. Pivoted to ICNF + on-demand dNBR.
+
+### Completed
+- [x] `src/api/routes/icnf.js` — proxy to `sigservices.icnf.pt/server/rest/services/BDG/areas_ardidas/MapServer`
+  - `GET /api/icnf/years` → list of valid year/range labels
+  - `GET /api/icnf/status` → health check
+  - `GET /api/icnf/burned-areas?year=YYYY[&precision=full]` → FeatureCollection (WGS84) with normalised props (cod_sgif, distrito, concelho, freguesia, area_ha, dh_inicio, causa, …)
+  - 24h cache per year (years are immutable historical datasets)
+  - Default `maxAllowableOffset=0.0001` (~11 m) — reduces payload ~60% and sidesteps ArcGIS 500s on dense polygons (see lessons.md #16)
+  - `?precision=full` available for analytical use that needs vertex fidelity
+- [x] `server.js` wires `/api/icnf` (`server.js:8`, `:27`)
+- [x] `src/pages/Home.tsx` — new sidebar card "ICNF (oficial)" with year selector populated from `/api/icnf/years`
+  - Polygons rendered in purple (`#7c3aed`) to distinguish from MCD64A1 red
+  - Backend smoke-tested live: 2024 (1558), 2017 (2765, paginated), 2025 (2084) all OK
+- [x] Discovery + workarounds documented in `lessons.md` #15 and #16
+- [x] Sidebar reorder (per user request 2026-04-28):
+  - 0. Fogos ao vivo (only ANEPC fogos.pt)
+  - 1. ICNF year selector
+  - 2. Análise (Configuração card)
+  - bottom: secondary layers (MCD64A1, NASA FIRMS demoted)
+
+### Updated freshness matrix
+| Layer                    | Source                                | Refresh           | Status |
+|--------------------------|---------------------------------------|-------------------|--------|
+| Active occurrences       | fogos.pt (ANEPC)                      | ~2 min            | ✅ primary |
+| Historical perimeters    | **ICNF MapServer (sigservices)**      | annual, validated | ✅ primary (1975-2025) |
+| Recent burned areas      | MODIS MCD64A1 (GEE)                   | monthly, ~2 mo lag | ✅ secondary |
+| Thermal hotspots         | NASA FIRMS                            | ~3 h              | ⚠️ demoted (redundant vs fogos.pt) |
+| Recent perimeters (gap)  | Sentinel-2 dNBR on demand             | 1-5 days post-fire | ⏳ planned (SO-9) |
+
+### Open / next
+- [ ] **SO-9: `POST /api/gee/derive-perimeter`** — Sentinel-2 dNBR on-demand vectorisation to fill the gap between current fire season and ICNF's annual release. Trigger: click on a fogos.pt point or a FIRMS hotspot. Reuses ~80% of `severity-maps` logic.
+- [ ] Mobile-first responsive pass (SO-3)
+- [ ] Auto-refresh fogos.pt every 2 min when card is active
