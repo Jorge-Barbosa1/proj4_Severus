@@ -1,97 +1,107 @@
 import { useEffect, useRef } from 'react';
 import Chart from 'chart.js/auto';
 import 'chartjs-adapter-date-fns';
+import { color } from '../../styles/theme';
+import { applyChartDefaults, makeLineGradient } from '../../styles/chart-defaults';
+
+applyChartDefaults();
 
 interface ChartProps {
   title?: string;
   data: { x: Date; y: number }[];
   xAxisLabel?: string;
   yAxisLabel?: string;
-  color?: string;
+  lineColor?: string;
 }
 
-function ChartComponent({ 
-  title = '', 
-  data, 
-  xAxisLabel = 'Data', 
-  yAxisLabel = 'Valor', 
-  color = '#D4381D' 
+function ChartComponent({
+  title = '',
+  data,
+  xAxisLabel = 'Data',
+  yAxisLabel = 'Valor',
+  lineColor = color.primary,
 }: ChartProps) {
-  const chartCanvas = useRef<HTMLCanvasElement>(null);
-  const chartInstance = useRef<Chart<'line'> | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const chartRef = useRef<Chart<'line'> | null>(null);
 
   useEffect(() => {
-    if (!chartCanvas.current) return;
-
-    const ctx = chartCanvas.current.getContext('2d');
+    if (!canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d');
     if (!ctx) return;
 
-    // Create chart
-    chartInstance.current = new Chart(ctx, {
+    chartRef.current = new Chart(ctx, {
       type: 'line',
       data: {
-        datasets: [{
-          label: title,
-          data: data as any,
-          borderColor: color,
-          backgroundColor: color + '33', // Color with transparency
-          tension: 0.1,
-          pointRadius: 3
-        }]
+        datasets: [
+          {
+            label: title || yAxisLabel,
+            data: data as any,
+            borderColor: lineColor,
+            backgroundColor: (c) => {
+              const chart = c.chart;
+              const { ctx: cctx, chartArea } = chart;
+              if (!chartArea) return `${lineColor}22`;
+              return makeLineGradient(cctx, lineColor, chartArea.height);
+            },
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            pointHoverBackgroundColor: lineColor,
+            pointHoverBorderColor: '#fff',
+            pointHoverBorderWidth: 1.5,
+            borderWidth: 2,
+          },
+        ],
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                const d = items[0]?.parsed?.x;
+                return d ? new Date(d).toISOString().slice(0, 10) : '';
+              },
+              label: (item) => `${yAxisLabel}: ${Number(item.parsed.y).toFixed(3)}`,
+            },
+          },
+        },
         scales: {
           x: {
             type: 'time',
-            time: {
-              unit: 'day'
-            },
-            title: {
-              display: true,
-              text: xAxisLabel
-            }
+            time: { unit: 'month', tooltipFormat: 'yyyy-MM-dd' },
+            title: { display: true, text: xAxisLabel },
+            grid: { display: false },
           },
           y: {
-            title: {
-              display: true,
-              text: yAxisLabel
-            }
-          }
-        }
-      }
+            title: { display: true, text: yAxisLabel },
+          },
+        },
+      },
     });
 
-    // Cleanup on unmount
     return () => {
-      if (chartInstance.current) {
-        chartInstance.current.destroy();
-        chartInstance.current = null;
-      }
+      chartRef.current?.destroy();
+      chartRef.current = null;
     };
   }, []);
 
-  // Update chart when data changes
   useEffect(() => {
-    if (chartInstance.current && data) {
-      console.log('Atualizando gráfico com dados:', data);
-      chartInstance.current.data.datasets[0].data = data as any;
-      chartInstance.current.update();
-    }
-  }, [data]);
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.data.datasets[0].data = data as any;
+    chart.data.datasets[0].label = title || yAxisLabel;
+    chart.options.scales!.y!.title = { display: true, text: yAxisLabel } as any;
+    chart.update();
+  }, [data, title, yAxisLabel]);
 
   return (
-    <div className="chart-container">
-      <canvas ref={chartCanvas}></canvas>
-      <style>{`
-        .chart-container {
-          position: relative;
-          height: 300px;
-          width: 100%;
-          margin: 20px 0;
-        }
-      `}</style>
+    <div style={{ position: 'relative', height: 320, width: '100%' }}>
+      <canvas ref={canvasRef} />
     </div>
   );
 }

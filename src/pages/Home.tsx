@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, CSSProperties } from 'react';
+import { useState, useEffect, useRef, CSSProperties, useMemo } from 'react';
 import Map, { MapHandle } from '../components/map/Map';
 import FireAnalyst from '../components/analyst/FireAnalyst';
+import ResultsPanel, { SeriesPoint, SeverityPoint } from '../components/analyst/ResultsPanel';
 import ChatWidget from '../components/ChatBot/ChatWidget';
 import InfoDialog from '../components/tutorials/InfoDialog';
-import { color, radius, space } from '../styles/theme';
+import { color, radius, space, shadow } from '../styles/theme';
 
 const s: Record<string, CSSProperties> = {
   root: {
@@ -51,6 +52,14 @@ const s: Record<string, CSSProperties> = {
     borderRadius: radius.lg,
     padding: space(3),
   },
+  cardAnalyst: {
+    background: `linear-gradient(145deg, ${color.bgRaised} 0%, rgba(249,115,22,0.05) 100%)`,
+    border: `1px solid ${color.border}`,
+    borderRadius: radius.lg,
+    padding: space(3),
+    position: 'relative',
+    overflow: 'hidden',
+  },
   cardTitle: {
     fontSize: '0.72rem',
     fontWeight: 600,
@@ -61,13 +70,45 @@ const s: Record<string, CSSProperties> = {
   },
   label: {
     display: 'block',
-    fontSize: '0.78rem',
-    fontWeight: 500,
-    color: color.textMuted,
+    fontSize: '0.72rem',
+    fontWeight: 600,
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase',
+    color: color.textFaint,
     marginBottom: space(1),
   },
   field: { marginBottom: space(3) },
   hint: { fontSize: '0.8rem', color: color.textFaint, lineHeight: 1.4 },
+  input: {
+    width: '100%',
+    background: color.bgInput,
+    color: color.text,
+    border: `1px solid ${color.borderSoft}`,
+    borderRadius: radius.md,
+    padding: `${space(2)} ${space(2)}`,
+    fontSize: '0.85rem',
+    outline: 'none',
+    fontFamily: 'inherit',
+    boxSizing: 'border-box',
+    colorScheme: 'dark',
+  },
+  select: {
+    width: '100%',
+    background: color.bgInput,
+    color: color.text,
+    border: `1px solid ${color.borderSoft}`,
+    borderRadius: radius.md,
+    padding: `${space(2)} ${space(2)}`,
+    fontSize: '0.85rem',
+    outline: 'none',
+    fontFamily: 'inherit',
+    boxSizing: 'border-box',
+    appearance: 'none',
+    backgroundImage: `url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='${encodeURIComponent(color.textMuted)}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 10px center',
+    paddingRight: 30,
+  },
   btnSecondary: {
     padding: `${space(2)} ${space(3)}`,
     background: color.bgHover,
@@ -76,6 +117,7 @@ const s: Record<string, CSSProperties> = {
     borderRadius: radius.md,
     fontSize: '0.82rem',
     fontWeight: 500,
+    cursor: 'pointer',
   },
   btnGhost: {
     padding: `${space(2)} ${space(3)}`,
@@ -84,8 +126,45 @@ const s: Record<string, CSSProperties> = {
     border: `1px solid ${color.borderSoft}`,
     borderRadius: radius.md,
     fontSize: '0.82rem',
+    cursor: 'pointer',
   },
   main: { flex: 1, position: 'relative', minWidth: 0 },
+  mapWrap: { position: 'absolute', inset: 0 },
+  panelToggle: {
+    position: 'absolute',
+    top: space(4),
+    right: space(4),
+    zIndex: 400,
+    background: 'rgba(17, 24, 39, 0.85)',
+    color: color.text,
+    border: `1px solid ${color.borderSoft}`,
+    borderRadius: radius.pill,
+    padding: `${space(2)} ${space(3)}`,
+    fontSize: '0.82rem',
+    fontWeight: 600,
+    cursor: 'pointer',
+    backdropFilter: 'blur(6px)',
+    WebkitBackdropFilter: 'blur(6px)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space(2),
+    boxShadow: shadow.md,
+  },
+  panelToggleDot: {
+    width: 7, height: 7, borderRadius: '50%',
+    background: color.primary,
+    boxShadow: `0 0 8px ${color.primary}`,
+  },
+  sectionLabel: {
+    fontSize: '0.68rem',
+    fontWeight: 700,
+    letterSpacing: '0.12em',
+    textTransform: 'uppercase',
+    color: color.textFaint,
+    marginTop: space(2),
+    marginBottom: space(1),
+    paddingLeft: space(1),
+  },
 };
 
 const dyn = {
@@ -142,9 +221,7 @@ function Home() {
   const [fogosMessage, setFogosMessage] = useState('');
   const [fogosCount, setFogosCount] = useState(0);
 
-  // Burned areas — MODIS MCD64A1 (monthly, ~1-2 month lag).
-  // Defaults target the last completed Portuguese fire season (Jun-Sep of previous year)
-  // so the user sees data on first click instead of empty winter months.
+  // MODIS burned areas (last completed fire season by default)
   const lastFireSeasonYear = new Date().getFullYear() - 1;
   const [baFrom, setBaFrom] = useState(`${lastFireSeasonYear}-06-01`);
   const [baTo, setBaTo] = useState(`${lastFireSeasonYear}-09-30`);
@@ -154,11 +231,17 @@ function Home() {
   const [baCount, setBaCount] = useState(0);
   const [baCoverage, setBaCoverage] = useState<{ earliest: string; latest: string } | null>(null);
 
-  // Analyst dates
+  // Analyst configuration
   const [fireDate, setFireDate] = useState('');
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-  const [analysisRangeDays] = useState(30);
+  const [windowSize, setWindowSize] = useState(30);
+
+  // Analyst results (lifted from FireAnalyst so the drawer can display them)
+  const [timeSeries, setTimeSeries] = useState<SeriesPoint[]>([]);
+  const [severity, setSeverity] = useState<SeverityPoint[]>([]);
+  const [analysisBusy, setAnalysisBusy] = useState(false);
+  const [resultsOpen, setResultsOpen] = useState(false);
 
   const satelliteLabels = {
     MODIS: 'Terra/MODIS',
@@ -172,54 +255,34 @@ function Home() {
   const satellites = Object.values(satelliteLabels);
   const indices = ['NBR', 'NDVI'];
 
-  const friendlyGeometryStatus = selectedGeometry
-    ? 'Area selected. You can run analysis now.'
-    : 'No area selected yet. Draw a polygon/rectangle on the map first.';
+  const geometryLabel = useMemo(() => {
+    if (!selectedGeometry) return undefined;
+    const type = selectedGeometry.type || 'Geometry';
+    return `${type} selecionada`;
+  }, [selectedGeometry]);
 
   useEffect(() => {
     const handleGeometryDrawn = (e: Event) => {
       setSelectedGeometry((e as CustomEvent).detail);
     };
     document.addEventListener('geometryDrawn', handleGeometryDrawn);
-    return () => {
-      document.removeEventListener('geometryDrawn', handleGeometryDrawn);
-    };
+    return () => document.removeEventListener('geometryDrawn', handleGeometryDrawn);
   }, []);
 
   const checkFirmsStatus = async () => {
     setFirmsLoading(true);
-    setFirmsMessage('Checking FIRMS connection...');
+    setFirmsMessage('A verificar ligação FIRMS...');
     try {
       const res = await fetch('/api/firms/status');
       const data = await res.json();
       setFirmsConfigured(Boolean(data.configured));
       setFirmsMessage(data.configured
-        ? 'FIRMS is connected and ready.'
-        : 'FIRMS key is missing. Add FIRMS_MAP_KEY to .env and restart server.');
+        ? 'FIRMS ligado e pronto.'
+        : 'Chave FIRMS em falta. Adiciona FIRMS_MAP_KEY ao .env e reinicia o servidor.');
     } catch (err) {
       console.error(err);
       setFirmsConfigured(false);
-      setFirmsMessage('Could not reach FIRMS endpoint right now.');
-    } finally {
-      setFirmsLoading(false);
-    }
-  };
-
-  const testFirmsHistorical = async () => {
-    setFirmsLoading(true);
-    setFirmsMessage('Testing historical FIRMS query...');
-    try {
-      const url = '/api/firms/historical?dataset=VIIRS_SNPP_SP&bbox=-10.0,36.8,-6.0,42.3&days=1&date=2016-08-16';
-      const res = await fetch(url);
-      const data = await res.json();
-      if (!res.ok) {
-        setFirmsMessage(data.error || 'Historical FIRMS test failed.');
-        return;
-      }
-      setFirmsMessage(`Historical FIRMS test succeeded: ${data.count ?? 0} detections for 2016-08-16.`);
-    } catch (err) {
-      console.error(err);
-      setFirmsMessage('Historical FIRMS test failed due to network/server error.');
+      setFirmsMessage('Não foi possível contactar o FIRMS agora.');
     } finally {
       setFirmsLoading(false);
     }
@@ -227,21 +290,17 @@ function Home() {
 
   const loadLiveHotspots = async () => {
     setFirmsLoading(true);
-    setFirmsMessage('Loading live hotspots...');
+    setFirmsMessage('A carregar hotspots ao vivo...');
     try {
-      const url = '/api/firms/active?dataset=VIIRS_SNPP_NRT&bbox=-10.0,36.8,-6.0,42.3&days=1';
-      const res = await fetch(url);
+      const res = await fetch('/api/firms/active?dataset=VIIRS_SNPP_NRT&bbox=-10.0,36.8,-6.0,42.3&days=1');
       const data = await res.json();
-      if (!res.ok) {
-        setFirmsMessage(data.error || 'Could not load live hotspots.');
-        return;
-      }
+      if (!res.ok) { setFirmsMessage(data.error || 'Não foi possível carregar hotspots.'); return; }
       await mapComponentRef.current?.addHotspotsLayer('firms-live', data.geojson);
       setLiveHotspotsCount(data.count ?? 0);
-      setFirmsMessage(`Live hotspots loaded: ${data.count ?? 0}`);
+      setFirmsMessage(`${data.count ?? 0} hotspots carregados.`);
     } catch (err) {
       console.error(err);
-      setFirmsMessage('Error loading live hotspots.');
+      setFirmsMessage('Erro ao carregar hotspots.');
     } finally {
       setFirmsLoading(false);
     }
@@ -250,7 +309,7 @@ function Home() {
   const clearLiveHotspots = () => {
     mapComponentRef.current?.removeHotspotsLayer('firms-live');
     setLiveHotspotsCount(0);
-    setFirmsMessage('Live hotspots removed from map.');
+    setFirmsMessage('Hotspots removidos.');
   };
 
   const loadActiveFogos = async () => {
@@ -259,10 +318,7 @@ function Home() {
     try {
       const res = await fetch('/api/fogos/active?onlyActive=true&onlyFires=true');
       const data = await res.json();
-      if (!res.ok) {
-        setFogosMessage(data.error || 'Não foi possível carregar ocorrências.');
-        return;
-      }
+      if (!res.ok) { setFogosMessage(data.error || 'Não foi possível carregar ocorrências.'); return; }
       await mapComponentRef.current?.addHotspotsLayer('fogos-active', data.geojson, {
         fillColor: '#f97316',
         color: '#9a3412',
@@ -276,14 +332,13 @@ function Home() {
             <strong>Início:</strong> ${p.datetime ?? '—'}<br/>
             <strong>Meios:</strong> 👤 ${p.man} • 🚒 ${p.terrain} • ✈️ ${p.aerial}<br/>
             <strong>Fonte:</strong> ANEPC (fogos.pt)
-          </div>
-        `,
+          </div>`,
       });
       setFogosCount(data.count ?? 0);
-      setFogosMessage(`${data.count ?? 0} ocorrências ativas carregadas (de ${data.totalItems ?? 0} totais).`);
+      setFogosMessage(`${data.count ?? 0} ativas (de ${data.totalItems ?? 0} totais).`);
     } catch (err) {
       console.error(err);
-      setFogosMessage('Erro de rede ao carregar ocorrências ANEPC.');
+      setFogosMessage('Erro de rede ao carregar ANEPC.');
     } finally {
       setFogosLoading(false);
     }
@@ -292,31 +347,23 @@ function Home() {
   const clearFogos = () => {
     mapComponentRef.current?.removeHotspotsLayer('fogos-active');
     setFogosCount(0);
-    setFogosMessage('Ocorrências ANEPC removidas.');
+    setFogosMessage('Ocorrências removidas.');
   };
 
   const loadModisBurned = async () => {
     setBaLoading(true);
     setBaMessageTone('info');
-    setBaMessage('A vectorizar áreas ardidas MODIS (pode demorar alguns segundos)...');
+    setBaMessage('A vectorizar áreas ardidas MODIS (alguns segundos)...');
     try {
-      const url = `/api/gee/modis-burned-areas?from=${baFrom}&to=${baTo}`;
-      const res = await fetch(url);
+      const res = await fetch(`/api/gee/modis-burned-areas?from=${baFrom}&to=${baTo}`);
       const data = await res.json();
-      if (!res.ok) {
-        setBaMessageTone('warn');
-        setBaMessage(data.message || data.error || 'Erro no MCD64A1.');
-        return;
-      }
+      if (!res.ok) { setBaMessageTone('warn'); setBaMessage(data.message || data.error || 'Erro no MCD64A1.'); return; }
       if (data.coverage) setBaCoverage(data.coverage);
       if (!data.geojson || data.count === 0) {
         mapComponentRef.current?.removeBurnedAreaLayer('modis-burned');
         setBaCount(0);
         setBaMessageTone('warn');
-        setBaMessage(
-          data.note ||
-            `0 patches ardidos em Portugal entre ${baFrom} e ${baTo}. Experimenta Jun–Set de um ano recente.`
-        );
+        setBaMessage(data.note || `0 patches em Portugal entre ${baFrom} e ${baTo}. Tenta Jun-Set de um ano recente.`);
         return;
       }
       await mapComponentRef.current?.addBurnedAreaLayer('modis-burned', data.geojson, {
@@ -325,9 +372,7 @@ function Home() {
       });
       setBaCount(data.count);
       setBaMessageTone('ok');
-      setBaMessage(
-        `${data.count} áreas ardidas · ~${data.totalBurnedKm2 ?? 0} km² no total (${baFrom} → ${baTo}). Último disponível: ${data.coverage?.latest ?? '—'}. Clica num polígono para detalhes.`
-      );
+      setBaMessage(`${data.count} áreas · ~${data.totalBurnedKm2 ?? 0} km². Último disponível: ${data.coverage?.latest ?? '—'}. Clica num polígono para detalhes.`);
     } catch (err) {
       console.error(err);
       setBaMessageTone('warn');
@@ -343,9 +388,18 @@ function Home() {
     setBaMessage('Áreas ardidas removidas.');
   };
 
-  useEffect(() => {
-    checkFirmsStatus();
-  }, []);
+  const handleTimeSeriesReady = (points: SeriesPoint[]) => {
+    setTimeSeries(points);
+    setResultsOpen(true);
+  };
+  const handleSeverityReady = (pts: SeverityPoint[]) => {
+    setSeverity(pts);
+    setResultsOpen(true);
+  };
+
+  useEffect(() => { checkFirmsStatus(); }, []);
+
+  const hasResults = timeSeries.length > 0 || severity.length > 0;
 
   return (
     <div style={s.root}>
@@ -357,7 +411,12 @@ function Home() {
 
         <span style={dyn.status(Boolean(firmsConfigured))}>
           <span style={dyn.statusDot(Boolean(firmsConfigured))} />
-          FIRMS {firmsConfigured ? 'connected' : 'not configured'}
+          FIRMS {firmsConfigured ? 'ligado' : 'sem chave'}
+        </span>
+
+        <span style={dyn.status(Boolean(selectedGeometry))}>
+          <span style={dyn.statusDot(Boolean(selectedGeometry))} />
+          {selectedGeometry ? 'Área selecionada' : 'Sem área'}
         </span>
 
         <div style={{ marginLeft: 'auto' }}>
@@ -367,146 +426,51 @@ function Home() {
 
       <div style={s.body}>
         <aside style={s.sidebar}>
-          <div style={s.card}>
-            <div style={s.cardTitle}>Quick guide</div>
-            <ol style={{ margin: 0, paddingLeft: space(4), color: color.text, fontSize: '0.88rem', lineHeight: 1.6 }}>
-              <li>Draw an area on the map</li>
-              <li>Choose satellite, index and dates</li>
-              <li>Plot the time series or calculate severity</li>
-            </ol>
-            <div style={{
-              marginTop: space(2),
-              fontSize: '0.8rem',
-              color: selectedGeometry ? color.success : color.warning,
-              fontWeight: 500,
-            }}>
-              {friendlyGeometryStatus}
-            </div>
-          </div>
-
-          <div style={s.card}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
-              <div style={s.cardTitle}>NASA FIRMS</div>
-              <span style={{ fontSize: '0.7rem', color: color.textFaint }}>
-                hotspots: {liveHotspotsCount}
-              </span>
-            </div>
-            <div style={{ ...s.hint, marginBottom: space(3) }}>
-              Live and historical hotspot detections for Portugal.
+          {/* ANALYST — primary workflow */}
+          <div style={s.sectionLabel}>Análise</div>
+          <div style={s.cardAnalyst}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: space(3) }}>
+              <div style={s.cardTitle}>Configuração</div>
+              {hasResults && (
+                <button onClick={() => setResultsOpen((o) => !o)} style={{ ...s.btnGhost, fontSize: '0.72rem' }}>
+                  {resultsOpen ? 'Fechar resultados' : 'Ver resultados'}
+                </button>
+              )}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
-              <button onClick={checkFirmsStatus} disabled={firmsLoading} style={s.btnGhost}>
-                Check connection
-              </button>
-              <button onClick={testFirmsHistorical} disabled={firmsLoading} style={s.btnGhost}>
-                Test 2016-08-16
-              </button>
-              <button onClick={loadLiveHotspots} disabled={firmsLoading || !firmsConfigured} style={s.btnSecondary}>
-                Show live hotspots
-              </button>
-              <button onClick={clearLiveHotspots} style={s.btnGhost}>
-                Clear hotspots
-              </button>
-            </div>
-
-            {firmsMessage && (
-              <div style={dyn.note(firmsConfigured ? 'info' : 'warn')}>
-                {firmsMessage}
-              </div>
-            )}
-          </div>
-
-          <div style={s.card}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
-              <div style={s.cardTitle}>ANEPC · fogos.pt</div>
-              <span style={{ fontSize: '0.7rem', color: color.textFaint }}>
-                ativas: {fogosCount}
-              </span>
-            </div>
-            <div style={{ ...s.hint, marginBottom: space(3) }}>
-              Ocorrências oficiais da Proteção Civil (atualização ~2 min).
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
-              <button onClick={loadActiveFogos} disabled={fogosLoading} style={s.btnSecondary}>
-                Mostrar ocorrências
-              </button>
-              <button onClick={clearFogos} style={s.btnGhost}>
-                Limpar
-              </button>
-            </div>
-            {fogosMessage && (
-              <div style={dyn.note('info')}>{fogosMessage}</div>
-            )}
-          </div>
-
-          <div style={s.card}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
-              <div style={s.cardTitle}>Áreas ardidas · MODIS</div>
-              <span style={{ fontSize: '0.7rem', color: color.textFaint }}>
-                áreas: {baCount}
-              </span>
-            </div>
-            <div style={{ ...s.hint, marginBottom: space(3) }}>
-              NASA MODIS MCD64A1 (500 m, mensal). {baCoverage
-                ? <>Cobertura real: <strong>{baCoverage.earliest}</strong> → <strong>{baCoverage.latest}</strong>.</>
-                : 'Atualizado mensalmente, ~1–2 meses de atraso.'}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(3) }}>
               <div>
-                <label style={s.label}>De</label>
-                <input type="date" value={baFrom} onChange={(e) => setBaFrom(e.target.value)} />
+                <label style={s.label}>Satélite</label>
+                <select value={selectedSatellite} onChange={(e) => setSelectedSatellite(e.target.value)} style={s.select}>
+                  <option value="">—</option>
+                  {satellites.map((sat) => <option key={sat} value={sat}>{sat}</option>)}
+                </select>
               </div>
               <div>
-                <label style={s.label}>Até</label>
-                <input type="date" value={baTo} onChange={(e) => setBaTo(e.target.value)} />
+                <label style={s.label}>Índice</label>
+                <select value={selectedIndex} onChange={(e) => setSelectedIndex(e.target.value)} style={s.select}>
+                  <option value="">—</option>
+                  {indices.map((i) => <option key={i} value={i}>{i}</option>)}
+                </select>
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
-              <button onClick={loadModisBurned} disabled={baLoading} style={s.btnSecondary}>
-                Mostrar áreas ardidas
-              </button>
-              <button onClick={clearBurnedAreas} style={s.btnGhost}>
-                Limpar
-              </button>
-            </div>
-            {baMessage && (
-              <div style={dyn.note(baMessageTone)}>{baMessage}</div>
-            )}
-          </div>
 
-          <div style={s.card}>
-            <div style={s.cardTitle}>Analyst tools</div>
-
-            <div style={s.field}>
-              <label style={s.label}>Satellite</label>
-              <select value={selectedSatellite} onChange={(e) => setSelectedSatellite(e.target.value)}>
-                <option value="">Select satellite</option>
-                {satellites.map((sat) => <option key={sat} value={sat}>{sat}</option>)}
-              </select>
+            <div style={s.sectionLabel}>Série temporal</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(3) }}>
+              <div>
+                <label style={s.label}>Início</label>
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={s.input} />
+              </div>
+              <div>
+                <label style={s.label}>Fim</label>
+                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={s.input} />
+              </div>
             </div>
 
-            <div style={s.field}>
-              <label style={s.label}>Index</label>
-              <select value={selectedIndex} onChange={(e) => setSelectedIndex(e.target.value)}>
-                <option value="">Select index</option>
-                {indices.map((i) => <option key={i} value={i}>{i}</option>)}
-              </select>
-            </div>
-
-            <div style={s.field}>
-              <label style={s.label}>Fire date</label>
-              <input type="date" value={fireDate} onChange={(e) => setFireDate(e.target.value)} />
-            </div>
-
-            <div style={s.field}>
-              <label style={s.label}>Start date</label>
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-            </div>
-
-            <div style={s.field}>
-              <label style={s.label}>End date</label>
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            <div style={s.sectionLabel}>Severidade</div>
+            <div style={{ marginBottom: space(2) }}>
+              <label style={s.label}>Data do incêndio</label>
+              <input type="date" value={fireDate} onChange={(e) => setFireDate(e.target.value)} style={s.input} />
             </div>
 
             <FireAnalyst
@@ -516,13 +480,98 @@ function Home() {
               index={selectedIndex}
               startDate={startDate}
               endDate={endDate}
-              analysisRangeDays={analysisRangeDays}
+              windowSize={windowSize}
+              onWindowSizeChange={setWindowSize}
+              onTimeSeriesReady={handleTimeSeriesReady}
+              onSeverityReady={handleSeverityReady}
+              onBusyChange={setAnalysisBusy}
             />
+
+            {!selectedGeometry && (
+              <div style={{ ...dyn.note('warn'), marginTop: space(3) }}>
+                Desenha uma área no mapa (polígono ou retângulo) para ativar a análise.
+              </div>
+            )}
+          </div>
+
+          {/* LIVE SOURCES */}
+          <div style={s.sectionLabel}>Fogos ao vivo</div>
+          <div style={s.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
+              <div style={s.cardTitle}>ANEPC · fogos.pt</div>
+              <span style={{ fontSize: '0.7rem', color: color.textFaint }}>ativas: {fogosCount}</span>
+            </div>
+            <div style={{ ...s.hint, marginBottom: space(3) }}>Ocorrências oficiais da Proteção Civil (~2 min).</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
+              <button onClick={loadActiveFogos} disabled={fogosLoading} style={s.btnSecondary}>Mostrar</button>
+              <button onClick={clearFogos} style={s.btnGhost}>Limpar</button>
+            </div>
+            {fogosMessage && <div style={dyn.note('info')}>{fogosMessage}</div>}
+          </div>
+
+          <div style={s.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
+              <div style={s.cardTitle}>NASA FIRMS</div>
+              <span style={{ fontSize: '0.7rem', color: color.textFaint }}>hotspots: {liveHotspotsCount}</span>
+            </div>
+            <div style={{ ...s.hint, marginBottom: space(3) }}>Deteções térmicas VIIRS (~3 h).</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
+              <button onClick={loadLiveHotspots} disabled={firmsLoading || !firmsConfigured} style={s.btnSecondary}>Mostrar</button>
+              <button onClick={clearLiveHotspots} style={s.btnGhost}>Limpar</button>
+            </div>
+            {firmsMessage && <div style={dyn.note(firmsConfigured ? 'info' : 'warn')}>{firmsMessage}</div>}
+          </div>
+
+          {/* HISTORICAL BURNED AREAS */}
+          <div style={s.sectionLabel}>Áreas ardidas</div>
+          <div style={s.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: space(1) }}>
+              <div style={s.cardTitle}>MODIS MCD64A1</div>
+              <span style={{ fontSize: '0.7rem', color: color.textFaint }}>áreas: {baCount}</span>
+            </div>
+            <div style={{ ...s.hint, marginBottom: space(3) }}>
+              Perímetros mensais (~1-2 meses de atraso). {baCoverage && <>Até <strong>{baCoverage.latest}</strong>.</>}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
+              <div>
+                <label style={s.label}>De</label>
+                <input type="date" value={baFrom} onChange={(e) => setBaFrom(e.target.value)} style={s.input} />
+              </div>
+              <div>
+                <label style={s.label}>Até</label>
+                <input type="date" value={baTo} onChange={(e) => setBaTo(e.target.value)} style={s.input} />
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
+              <button onClick={loadModisBurned} disabled={baLoading} style={s.btnSecondary}>Mostrar</button>
+              <button onClick={clearBurnedAreas} style={s.btnGhost}>Limpar</button>
+            </div>
+            {baMessage && <div style={dyn.note(baMessageTone)}>{baMessage}</div>}
           </div>
         </aside>
 
         <main style={s.main}>
-          <Map ref={mapComponentRef} />
+          <div style={s.mapWrap}>
+            <Map ref={mapComponentRef} />
+          </div>
+
+          {hasResults && !resultsOpen && (
+            <button onClick={() => setResultsOpen(true)} style={s.panelToggle}>
+              <span style={s.panelToggleDot} />
+              Resultados da análise
+            </button>
+          )}
+
+          <ResultsPanel
+            open={resultsOpen}
+            onClose={() => setResultsOpen(false)}
+            timeSeries={timeSeries}
+            severity={severity}
+            index={selectedIndex}
+            satellite={selectedSatellite}
+            geometryLabel={geometryLabel}
+            busy={analysisBusy}
+          />
         </main>
       </div>
 

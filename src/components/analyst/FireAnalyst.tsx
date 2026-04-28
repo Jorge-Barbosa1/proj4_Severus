@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import TimeSeriesChart from '../charts/Chart';
-import SeverityChart from '../charts/SeverityChart';
+import { CSSProperties, useState } from 'react';
 import { normalizeSatelliteLabel } from '../../lib/services/gee-constants';
+import { color, radius, space } from '../../styles/theme';
+import type { SeriesPoint, SeverityPoint } from './ResultsPanel';
 
 interface FireAnalystProps {
   geometry?: any;
@@ -10,33 +10,61 @@ interface FireAnalystProps {
   index?: string;
   startDate?: string;
   endDate?: string;
-  analysisRangeDays?: number;
-  onTimeSeriesReady?: (data: { data: { x: Date; y: number }[] }) => void;
-  onSeverityReady?: (data: { data: { days: number; delta: number }[] }) => void;
+  windowSize: number;
+  onWindowSizeChange: (n: number) => void;
+  onTimeSeriesReady: (data: SeriesPoint[]) => void;
+  onSeverityReady: (data: SeverityPoint[]) => void;
+  onBusyChange?: (busy: boolean) => void;
 }
 
-function FireAnalyst({
-  geometry = null,
+type Running = 'series' | 'severity' | null;
+
+export default function FireAnalyst({
+  geometry,
   fireDate = '',
   satellite = '',
   index = '',
   startDate = '',
   endDate = '',
-  analysisRangeDays = 30,
+  windowSize,
+  onWindowSizeChange,
   onTimeSeriesReady,
-  onSeverityReady
+  onSeverityReady,
+  onBusyChange,
 }: FireAnalystProps) {
-  const [isLoading, setIsLoading] = useState(false);
-  const [timeSeriesData, setTimeSeriesData] = useState<{ x: Date; y: number }[]>([]);
-  const [severityData, setSeverityData] = useState<{ days: number; delta: number }[]>([]);
+  const [running, setRunning] = useState<Running>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const busy = running !== null;
+
+  const missingFor = (kind: Running): string[] => {
+    const missing: string[] = [];
+    if (!geometry) missing.push('geometria (desenha no mapa)');
+    if (!satellite) missing.push('satélite');
+    if (!index) missing.push('índice');
+    if (kind === 'series') {
+      if (!startDate) missing.push('data início');
+      if (!endDate) missing.push('data fim');
+    }
+    if (kind === 'severity') {
+      if (!fireDate) missing.push('data do incêndio');
+    }
+    return missing;
+  };
+
+  const setBusy = (r: Running) => {
+    setRunning(r);
+    onBusyChange?.(r !== null);
+  };
 
   const plotTimeSeries = async () => {
-    if (!geometry || !satellite || !index || !startDate || !endDate) {
-      alert('Faltam parâmetros para gerar a série temporal.');
+    const missing = missingFor('series');
+    if (missing.length) {
+      setError(`Faltam campos: ${missing.join(', ')}`);
       return;
     }
-
-    setIsLoading(true);
+    setError(null);
+    setBusy('series');
     try {
       const res = await fetch('/api/gee/time-series', {
         method: 'POST',
@@ -46,36 +74,31 @@ function FireAnalyst({
           index,
           startDate,
           endDate,
-          geometry
-        })
+          geometry,
+        }),
       });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`Erro do servidor: ${res.status} - ${errorText}`);
-      }
-
+      if (!res.ok) throw new Error(`Servidor respondeu ${res.status}`);
       const { data } = await res.json();
-      const formattedData = data.map((d: any) => ({
+      const points: SeriesPoint[] = (data || []).map((d: any) => ({
         x: new Date(d.date),
-        y: d.value
+        y: Number(d.value),
       }));
-      setTimeSeriesData(formattedData);
-      onTimeSeriesReady?.({ data: formattedData });
+      onTimeSeriesReady(points);
     } catch (err: any) {
-      console.error(err);
-      alert(`Erro ao gerar série temporal: ${err.message}`);
+      setError(err?.message || 'Erro inesperado ao calcular a série.');
     } finally {
-      setIsLoading(false);
+      setBusy(null);
     }
   };
 
   const calculateSeverity = async () => {
-    if (!geometry || !fireDate) {
-      alert('Selecione uma área e indique a data do incêndio.');
+    const missing = missingFor('severity');
+    if (missing.length) {
+      setError(`Faltam campos: ${missing.join(', ')}`);
       return;
     }
-    setIsLoading(true);
+    setError(null);
+    setBusy('severity');
     try {
       const res = await fetch('/api/gee/severity', {
         method: 'POST',
@@ -84,108 +107,115 @@ function FireAnalyst({
           satellite: normalizeSatelliteLabel(satellite),
           index,
           fireDate,
-          windowSize: analysisRangeDays,
-          geometry
-        })
+          windowSize,
+          geometry,
+        }),
       });
-
-      if (!res.ok) throw new Error('Erro ao obter severidade');
-
+      if (!res.ok) throw new Error(`Servidor respondeu ${res.status}`);
       const { data } = await res.json();
-      const formattedData = data.days.map((d: number, i: number) => ({
+      const pts: SeverityPoint[] = (data.days || []).map((d: number, i: number) => ({
         days: d,
-        delta: data.deltas[i]
+        delta: data.deltas[i],
       }));
-      setSeverityData(formattedData);
-      onSeverityReady?.({ data: formattedData });
+      onSeverityReady(pts);
     } catch (err: any) {
-      console.error(err);
-      alert(`Erro ao calcular severidade: ${err.message}`);
+      setError(err?.message || 'Erro inesperado ao calcular severidade.');
     } finally {
-      setIsLoading(false);
+      setBusy(null);
     }
   };
 
+  const s: Record<string, CSSProperties> = {
+    row: { display: 'flex', gap: space(2), alignItems: 'center' },
+    windowBlock: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: space(1),
+      padding: `${space(2)} ${space(3)}`,
+      background: color.bgRaised,
+      borderRadius: radius.md,
+      border: `1px solid ${color.border}`,
+    },
+    windowLabel: {
+      fontSize: '0.7rem',
+      textTransform: 'uppercase',
+      letterSpacing: '0.08em',
+      color: color.textFaint,
+      fontWeight: 600,
+    },
+    windowInput: {
+      width: '100%',
+      background: color.bgInput,
+      color: color.text,
+      border: `1px solid ${color.borderSoft}`,
+      borderRadius: radius.sm,
+      padding: `${space(1)} ${space(2)}`,
+      fontSize: '0.85rem',
+    },
+    btn: (variant: 'primary' | 'secondary'): CSSProperties => ({
+      flex: 1,
+      padding: `${space(3)} ${space(3)}`,
+      fontSize: '0.88rem',
+      fontWeight: 600,
+      border: `1px solid ${variant === 'primary' ? color.primary : color.borderSoft}`,
+      background: variant === 'primary' ? color.primary : 'transparent',
+      color: variant === 'primary' ? color.primaryText : color.text,
+      borderRadius: radius.md,
+      cursor: busy ? 'not-allowed' : 'pointer',
+      opacity: busy ? 0.55 : 1,
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: space(2),
+      transition: 'background 150ms, transform 150ms',
+    }),
+    spinner: {
+      width: 14,
+      height: 14,
+      border: `2px solid currentColor`,
+      borderTopColor: 'transparent',
+      borderRadius: '50%',
+      animation: 'fa-spin 0.7s linear infinite',
+      display: 'inline-block',
+    },
+    errorBox: {
+      marginTop: space(2),
+      padding: `${space(2)} ${space(3)}`,
+      background: 'rgba(239,68,68,0.08)',
+      border: `1px solid rgba(239,68,68,0.35)`,
+      color: color.danger,
+      borderRadius: radius.md,
+      fontSize: '0.8rem',
+    },
+  };
+
   return (
-    <>
-      <div className="analysis-tools">
-        <button
-          className="action-button primary"
-          onClick={plotTimeSeries}
-          disabled={isLoading}
-        >
-          {isLoading ? 'Running...' : 'Plot time series'}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: space(2), marginTop: space(2) }}>
+      <div style={s.windowBlock}>
+        <label style={s.windowLabel}>Janela de severidade (dias por passo)</label>
+        <input
+          type="number"
+          min={5}
+          max={365}
+          step={5}
+          value={windowSize}
+          onChange={(e) => onWindowSizeChange(Math.max(5, Math.min(365, Number(e.target.value) || 30)))}
+          style={s.windowInput}
+        />
+      </div>
+
+      <div style={s.row}>
+        <button onClick={plotTimeSeries} disabled={busy} style={s.btn('primary')}>
+          {running === 'series' ? <><span style={s.spinner} /> A calcular…</> : 'Série temporal'}
         </button>
-        <button
-          className="action-button secondary"
-          onClick={calculateSeverity}
-          disabled={isLoading}
-        >
-          {isLoading ? 'Running...' : 'Calculate severity'}
+        <button onClick={calculateSeverity} disabled={busy} style={s.btn('secondary')}>
+          {running === 'severity' ? <><span style={s.spinner} /> A calcular…</> : 'Severidade'}
         </button>
       </div>
 
-      {timeSeriesData.length > 0 && (
-        <TimeSeriesChart
-          data={timeSeriesData}
-          title={`${index} - Série Temporal`}
-          xAxisLabel="Data"
-          yAxisLabel={index}
-        />
-      )}
+      {error && <div style={s.errorBox}>{error}</div>}
 
-      {severityData.length > 0 && (
-        <SeverityChart data={severityData} index={index} />
-      )}
-
-      <style>{`
-        .analysis-tools {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          margin-top: 12px;
-        }
-
-        .action-button {
-          padding: 10px 14px;
-          border-radius: 8px;
-          font-weight: 600;
-          font-size: 0.9rem;
-          cursor: pointer;
-          transition: background-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
-          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-        }
-
-        .action-button.primary {
-          background: #f97316;
-          color: #0b1220;
-          border: 1px solid #f97316;
-        }
-
-        .action-button.primary:hover:not(:disabled) {
-          background: #ea580c;
-          transform: translateY(-1px);
-        }
-
-        .action-button.secondary {
-          background: transparent;
-          color: #f1f5f9;
-          border: 1px solid #334155;
-        }
-
-        .action-button.secondary:hover:not(:disabled) {
-          background: #1e293b;
-          border-color: #475569;
-        }
-
-        .action-button:disabled {
-          opacity: 0.55;
-          cursor: not-allowed;
-          transform: none;
-        }
-      `}</style>
-    </>
+      <style>{`@keyframes fa-spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
   );
 }
-
-export default FireAnalyst;
