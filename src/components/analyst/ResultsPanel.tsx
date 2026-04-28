@@ -2,6 +2,7 @@ import { CSSProperties, useMemo, useState } from 'react';
 import TimeSeriesChart from '../charts/Chart';
 import SeverityChart from '../charts/SeverityChart';
 import { color, radius, space, shadow } from '../../styles/theme';
+import { useMediaQuery, MOBILE_QUERY } from '../../hooks/useMediaQuery';
 
 export type SeriesPoint = { x: Date; y: number };
 export type SeverityPoint = { days: number; delta: number | null };
@@ -57,6 +58,10 @@ export default function ResultsPanel({
   geometryLabel,
   busy = false,
 }: ResultsPanelProps) {
+  const isMobile = useMediaQuery(MOBILE_QUERY);
+  const panelWidth = isMobile ? '100vw' : `${PANEL_WIDTH}px`;
+  const offscreen = isMobile ? '100vw' : `${PANEL_WIDTH + 40}px`;
+
   const hasSeries = timeSeries.length > 0;
   const hasSeverity = severity.length > 0;
   const [tab, setTab] = useState<Tab>(hasSeries ? 'series' : 'severity');
@@ -76,13 +81,13 @@ export default function ResultsPanel({
       top: 0,
       right: 0,
       bottom: 0,
-      width: PANEL_WIDTH,
+      width: panelWidth,
       background: 'rgba(17, 24, 39, 0.92)',
       backdropFilter: 'blur(10px)',
       WebkitBackdropFilter: 'blur(10px)',
       borderLeft: `1px solid ${color.border}`,
       boxShadow: shadow.lg,
-      transform: `translateX(${open ? 0 : PANEL_WIDTH + 40}px)`,
+      transform: open ? 'translateX(0)' : `translateX(${offscreen})`,
       transition: 'transform 240ms cubic-bezier(.2,.8,.2,1)',
       display: 'flex',
       flexDirection: 'column',
@@ -103,8 +108,8 @@ export default function ResultsPanel({
       color: color.textMuted,
       border: `1px solid ${color.borderSoft}`,
       borderRadius: radius.md,
-      width: 28,
-      height: 28,
+      width: isMobile ? 40 : 28,
+      height: isMobile ? 40 : 28,
       cursor: 'pointer',
       fontSize: '1rem',
       lineHeight: 1,
@@ -138,7 +143,7 @@ export default function ResultsPanel({
     },
     statsGrid: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(4, 1fr)',
+      gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
       gap: space(2),
     },
     statCard: {

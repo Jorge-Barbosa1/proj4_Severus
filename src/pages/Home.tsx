@@ -5,6 +5,7 @@ import ResultsPanel, { SeriesPoint, SeverityPoint } from '../components/analyst/
 import ChatWidget from '../components/ChatBot/ChatWidget';
 import InfoDialog from '../components/tutorials/InfoDialog';
 import { color, radius, space, shadow } from '../styles/theme';
+import { useMediaQuery, MOBILE_QUERY } from '../hooks/useMediaQuery';
 
 const s: Record<string, CSSProperties> = {
   root: {
@@ -165,6 +166,43 @@ const s: Record<string, CSSProperties> = {
     marginBottom: space(1),
     paddingLeft: space(1),
   },
+  hamburger: {
+    background: color.bgRaised,
+    color: color.text,
+    border: `1px solid ${color.borderSoft}`,
+    borderRadius: radius.md,
+    width: 44,
+    height: 44,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '1.1rem',
+    cursor: 'pointer',
+  },
+  backdrop: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(0,0,0,0.55)',
+    backdropFilter: 'blur(2px)',
+    WebkitBackdropFilter: 'blur(2px)',
+    zIndex: 999,
+  },
+  drawerHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: space(2),
+  },
+  drawerClose: {
+    background: 'transparent',
+    color: color.textMuted,
+    border: `1px solid ${color.borderSoft}`,
+    borderRadius: radius.md,
+    width: 36,
+    height: 36,
+    fontSize: '1.1rem',
+    cursor: 'pointer',
+  },
 };
 
 const dyn = {
@@ -204,6 +242,9 @@ const dyn = {
 };
 
 function Home() {
+  const isMobile = useMediaQuery(MOBILE_QUERY);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
   const [selectedSatellite, setSelectedSatellite] = useState('');
   const [selectedIndex, setSelectedIndex] = useState('');
 
@@ -276,6 +317,29 @@ function Home() {
     document.addEventListener('geometryDrawn', handleGeometryDrawn);
     return () => document.removeEventListener('geometryDrawn', handleGeometryDrawn);
   }, []);
+
+  useEffect(() => {
+    if (!isMobile) setDrawerOpen(false);
+  }, [isMobile]);
+
+  const touch = (base: CSSProperties): CSSProperties =>
+    isMobile ? { ...base, minHeight: 44 } : base;
+
+  const sidebarStyle: CSSProperties = isMobile
+    ? {
+        ...s.sidebar,
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        bottom: 0,
+        width: 'min(360px, 86vw)',
+        zIndex: 1000,
+        transform: drawerOpen ? 'translateX(0)' : 'translateX(-100%)',
+        transition: 'transform 240ms cubic-bezier(.2,.8,.2,1)',
+        boxShadow: drawerOpen ? shadow.lg : 'none',
+        borderRight: `1px solid ${color.border}`,
+      }
+    : s.sidebar;
 
   const checkFirmsStatus = async () => {
     setFirmsLoading(true);
@@ -464,21 +528,35 @@ function Home() {
 
   return (
     <div style={s.root}>
-      <header style={s.header}>
+      <header style={isMobile ? { ...s.header, padding: `${space(2)} ${space(3)}`, gap: space(2) } : s.header}>
+        {isMobile && (
+          <button
+            onClick={() => setDrawerOpen(true)}
+            style={s.hamburger}
+            aria-label="Abrir controlos"
+          >
+            ☰
+          </button>
+        )}
+
         <div style={s.brand}>
           <span style={s.brandDot} />
-          FireAnalyst <span style={{ color: color.textMuted, fontWeight: 400 }}>• Portugal</span>
+          FireAnalyst {!isMobile && <span style={{ color: color.textMuted, fontWeight: 400 }}>• Portugal</span>}
         </div>
 
-        <span style={dyn.status(Boolean(firmsConfigured))}>
-          <span style={dyn.statusDot(Boolean(firmsConfigured))} />
-          FIRMS {firmsConfigured ? 'ligado' : 'sem chave'}
-        </span>
+        {!isMobile && (
+          <>
+            <span style={dyn.status(Boolean(firmsConfigured))}>
+              <span style={dyn.statusDot(Boolean(firmsConfigured))} />
+              FIRMS {firmsConfigured ? 'ligado' : 'sem chave'}
+            </span>
 
-        <span style={dyn.status(Boolean(selectedGeometry))}>
-          <span style={dyn.statusDot(Boolean(selectedGeometry))} />
-          {selectedGeometry ? 'Área selecionada' : 'Sem área'}
-        </span>
+            <span style={dyn.status(Boolean(selectedGeometry))}>
+              <span style={dyn.statusDot(Boolean(selectedGeometry))} />
+              {selectedGeometry ? 'Área selecionada' : 'Sem área'}
+            </span>
+          </>
+        )}
 
         <div style={{ marginLeft: 'auto' }}>
           <InfoDialog docPath="/tutorials/analyst_tutorial.txt" />
@@ -486,7 +564,24 @@ function Home() {
       </header>
 
       <div style={s.body}>
-        <aside style={s.sidebar}>
+        {isMobile && drawerOpen && (
+          <div style={s.backdrop} onClick={() => setDrawerOpen(false)} aria-hidden />
+        )}
+        <aside style={sidebarStyle} aria-hidden={isMobile && !drawerOpen}>
+          {isMobile && (
+            <div style={s.drawerHeader}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: color.textMuted }}>
+                Controlos
+              </span>
+              <button
+                onClick={() => setDrawerOpen(false)}
+                style={s.drawerClose}
+                aria-label="Fechar controlos"
+              >
+                ×
+              </button>
+            </div>
+          )}
           {/* 1. LIVE FIRES — primary */}
           <div style={s.sectionLabel}>Fogos ao vivo</div>
           <div style={s.card}>
@@ -496,8 +591,8 @@ function Home() {
             </div>
             <div style={{ ...s.hint, marginBottom: space(3) }}>Ocorrências oficiais da Proteção Civil (~2 min).</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
-              <button onClick={loadActiveFogos} disabled={fogosLoading} style={s.btnSecondary}>Mostrar</button>
-              <button onClick={clearFogos} style={s.btnGhost}>Limpar</button>
+              <button onClick={loadActiveFogos} disabled={fogosLoading} style={touch(s.btnSecondary)}>Mostrar</button>
+              <button onClick={clearFogos} style={touch(s.btnGhost)}>Limpar</button>
             </div>
             {fogosMessage && <div style={dyn.note('info')}>{fogosMessage}</div>}
           </div>
@@ -520,8 +615,8 @@ function Home() {
               </select>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
-              <button onClick={loadIcnf} disabled={icnfLoading} style={s.btnSecondary}>Mostrar</button>
-              <button onClick={clearIcnf} style={s.btnGhost}>Limpar</button>
+              <button onClick={loadIcnf} disabled={icnfLoading} style={touch(s.btnSecondary)}>Mostrar</button>
+              <button onClick={clearIcnf} style={touch(s.btnGhost)}>Limpar</button>
             </div>
             {icnfMessage && <div style={dyn.note(icnfMessageTone)}>{icnfMessage}</div>}
           </div>
@@ -615,8 +710,8 @@ function Home() {
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
-              <button onClick={loadModisBurned} disabled={baLoading} style={s.btnSecondary}>Mostrar</button>
-              <button onClick={clearBurnedAreas} style={s.btnGhost}>Limpar</button>
+              <button onClick={loadModisBurned} disabled={baLoading} style={touch(s.btnSecondary)}>Mostrar</button>
+              <button onClick={clearBurnedAreas} style={touch(s.btnGhost)}>Limpar</button>
             </div>
             {baMessage && <div style={dyn.note(baMessageTone)}>{baMessage}</div>}
           </div>
@@ -628,8 +723,8 @@ function Home() {
             </div>
             <div style={{ ...s.hint, marginBottom: space(3) }}>Deteções térmicas VIIRS (~3 h). Complementar à ANEPC.</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space(2), marginBottom: space(2) }}>
-              <button onClick={loadLiveHotspots} disabled={firmsLoading || !firmsConfigured} style={s.btnSecondary}>Mostrar</button>
-              <button onClick={clearLiveHotspots} style={s.btnGhost}>Limpar</button>
+              <button onClick={loadLiveHotspots} disabled={firmsLoading || !firmsConfigured} style={touch(s.btnSecondary)}>Mostrar</button>
+              <button onClick={clearLiveHotspots} style={touch(s.btnGhost)}>Limpar</button>
             </div>
             {firmsMessage && <div style={dyn.note(firmsConfigured ? 'info' : 'warn')}>{firmsMessage}</div>}
           </div>
